@@ -5,14 +5,16 @@ import '../models/employee.dart';
 import '../widgets/employee_dialog.dart';
 
 class EmployeeManagementPage extends StatelessWidget {
+  const EmployeeManagementPage({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Employee Management')),
+      appBar: AppBar(title: const Text('Employee Management')),
       body: Consumer<EmployeeProvider>(
         builder: (context, employeeProvider, child) {
           if (employeeProvider.isLoading) {
-            return Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator());
           }
           return ListView.builder(
             itemCount: employeeProvider.employees.length,
@@ -25,11 +27,11 @@ class EmployeeManagementPage extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      icon: Icon(Icons.edit),
+                      icon: const Icon(Icons.edit),
                       onPressed: () => _editEmployee(context, employeeProvider, employee),
                     ),
                     IconButton(
-                      icon: Icon(Icons.delete),
+                      icon: const Icon(Icons.delete),
                       onPressed: () => _deleteEmployee(context, employeeProvider, employee),
                     ),
                   ],
@@ -40,7 +42,7 @@ class EmployeeManagementPage extends StatelessWidget {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        child: Icon(Icons.add),
+        child: const Icon(Icons.add),
         onPressed: () => _addEmployee(context),
       ),
     );
@@ -73,15 +75,15 @@ class EmployeeManagementPage extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete Employee'),
+        title: const Text('Delete Employee'),
         content: Text('Are you sure you want to delete ${employee.name}?'),
         actions: [
           TextButton(
-            child: Text('Cancel'),
+            child: const Text('Cancel'),
             onPressed: () => Navigator.of(context).pop(),
           ),
           TextButton(
-            child: Text('Delete'),
+            child: const Text('Delete'),
             onPressed: () {
               provider.deleteEmployee(employee);
               Navigator.of(context).pop();

@@ -6,7 +6,7 @@ import '../utils/error_handler.dart';
 
 class ShiftProvider with ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  Map<DateTime, List<Shift>> _shifts = {};
+  final Map<DateTime, List<Shift>> _shifts = {};
   List<ShiftPeriod> _shiftPeriods = [];
   bool _isLoading = false;
 

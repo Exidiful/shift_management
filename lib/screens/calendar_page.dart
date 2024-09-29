@@ -15,6 +15,8 @@ import '../providers/theme_provider.dart';
 import '../utils/app_theme.dart';
 
 class CalendarPage extends StatefulWidget {
+  const CalendarPage({super.key});
+
   @override
   _CalendarPageState createState() => _CalendarPageState();
 }
@@ -23,7 +25,6 @@ class _CalendarPageState extends State<CalendarPage> {
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
-  String? _currentUserId;
 
   @override
   void initState() {
@@ -35,12 +36,11 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _fetchInitialData() {
-    final authService = Provider.of<AuthService>(context, listen: false);
+    Provider.of<AuthService>(context, listen: false);
     final shiftProvider = Provider.of<ShiftProvider>(context, listen: false);
     final employeeProvider = Provider.of<EmployeeProvider>(context, listen: false);
     final teamProvider = Provider.of<TeamProvider>(context, listen: false);
 
-    _currentUserId = authService.currentUser?.uid;
 
     shiftProvider.fetchShiftPeriods();
     teamProvider.fetchTeams();
@@ -53,45 +53,10 @@ class _CalendarPageState extends State<CalendarPage> {
     return Consumer<ShiftProvider>(
       builder: (context, shiftProvider, child) {
         if (shiftProvider.isLoading) {
-          return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor)));
+          return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor)));
         }
-        return Scaffold(
-          appBar: _buildAppBar(),
-          body: _buildCalendarContent(context),
-          floatingActionButton: FloatingActionButton(
-            child: Icon(Icons.add, color: AppTheme.accentColor),
-            backgroundColor: AppTheme.primaryColor,
-            onPressed: () => _addShift(context),
-          ),
-        );
+        return _buildCalendarContent(context);
       },
-    );
-  }
-
-  AppBar _buildAppBar() {
-    return AppBar(
-      title: Text('Shift Calendar', style: TextStyle(fontWeight: FontWeight.w300)),
-      actions: [
-        IconButton(
-          icon: Icon(Icons.brightness_6, color: AppTheme.primaryColor),
-          onPressed: () {
-            final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
-            themeProvider.toggleTheme();
-          },
-        ),
-        IconButton(
-          icon: Icon(Icons.settings),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ShiftPeriodsPage())),
-        ),
-        IconButton(
-          icon: Icon(Icons.people),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => EmployeeManagementPage())),
-        ),
-        IconButton(
-          icon: Icon(Icons.logout),
-          onPressed: () async => await context.read<AuthService>().signOut(),
-        ),
-      ],
     );
   }
 
@@ -100,11 +65,11 @@ class _CalendarPageState extends State<CalendarPage> {
       child: Column(
         children: [
           _buildTableCalendar(),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           _buildShiftList(),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           _buildWeeklyShiftChart(),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           _buildEmployeeShiftDistribution(),
         ],
       ),
@@ -188,12 +153,12 @@ class _CalendarPageState extends State<CalendarPage> {
 
         final selectedShifts = shiftProvider.shifts[DateTime(_selectedDay!.year, _selectedDay!.month, _selectedDay!.day)] ?? [];
         if (selectedShifts.isEmpty) {
-          return Center(child: Text('No shifts scheduled for this day'));
+          return const Center(child: Text('No shifts scheduled for this day'));
         }
 
         return ListView.builder(
           shrinkWrap: true,
-          physics: NeverScrollableScrollPhysics(),
+          physics: const NeverScrollableScrollPhysics(),
           itemCount: selectedShifts.length,
           itemBuilder: (context, index) {
             final shift = selectedShifts[index];
@@ -212,8 +177,7 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   void _addShift(BuildContext context) {
-    final employeeProvider = Provider.of<EmployeeProvider>(context, listen: false);
-    final initialEmployeeId = employeeProvider.employees.any((e) => e.id == _currentUserId) ? _currentUserId : null;
+    Provider.of<EmployeeProvider>(context, listen: false);
 
     showDialog(
       context: context,
@@ -260,15 +224,15 @@ class _CalendarPageState extends State<CalendarPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete Shift'),
-        content: Text('Are you sure you want to delete this shift?'),
+        title: const Text('Delete Shift'),
+        content: const Text('Are you sure you want to delete this shift?'),
         actions: [
           TextButton(
-            child: Text('Cancel'),
+            child: const Text('Cancel'),
             onPressed: () => Navigator.of(context).pop(),
           ),
           TextButton(
-            child: Text('Delete'),
+            child: const Text('Delete'),
             onPressed: () async {
               await Provider.of<ShiftProvider>(context, listen: false).deleteShift(shift);
               Navigator.of(context).pop();
@@ -290,7 +254,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
         return Container(
           height: 200,
-          padding: EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
           child: BarChart(
             BarChartData(
               alignment: BarChartAlignment.spaceAround,
@@ -307,9 +271,9 @@ class _CalendarPageState extends State<CalendarPage> {
                     reservedSize: 30,
                   ),
                 ),
-                leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
               ),
               borderData: FlBorderData(show: false),
               barGroups: List.generate(7, (index) {
@@ -337,28 +301,28 @@ class _CalendarPageState extends State<CalendarPage> {
 
         return Container(
           height: 300,
-          padding: EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              Text('Employee Shift Distribution', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              SizedBox(height: 8),
+              const Text('Employee Shift Distribution', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
               Expanded(
                 child: PieChart(
                   PieChartData(
                     sections: employeeShiftCounts.entries.map((entry) {
-                      final employee = employeeProvider.getEmployeeById(entry.key);
+                      employeeProvider.getEmployeeById(entry.key);
                       return PieChartSectionData(
                         color: Colors.primaries[entry.key.hashCode % Colors.primaries.length],
                         value: entry.value.toDouble(),
                         title: '${(entry.value / totalShifts * 100).toStringAsFixed(1)}%',
                         radius: 50,
-                        titleStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                        titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
                       );
                     }).toList(),
                   ),
                 ),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 4,

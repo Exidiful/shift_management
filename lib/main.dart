@@ -6,9 +6,11 @@ import 'providers/employee_provider.dart';
 import 'providers/team_provider.dart';
 import 'services/auth_service.dart';
 import 'screens/calendar_page.dart';
+import 'screens/login_screen.dart';  // Add this import
 import 'firebase_options.dart';
 import 'utils/app_theme.dart';
 import 'providers/theme_provider.dart';
+import 'screens/home_page.dart'; // {{ Added import for HomePage }}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,13 +32,15 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeProvider>(
       builder: (context, themeProvider, child) {
         return MaterialApp(
-          title: 'Shift Calendar',
-          theme: AppTheme.lightTheme,
+          title: 'Shift Scheduler',
+          theme: AppTheme.lightTheme,  // Change this line
           darkTheme: AppTheme.darkTheme,
           themeMode: themeProvider.themeMode,
           home: AuthWrapper(),
@@ -47,6 +51,8 @@ class MyApp extends StatelessWidget {
 }
 
 class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AuthService>(
@@ -57,12 +63,11 @@ class AuthWrapper extends StatelessWidget {
             if (snapshot.connectionState == ConnectionState.active) {
               final user = snapshot.data;
               if (user == null) {
-                // TODO: Replace with your login screen
-                return Scaffold(body: Center(child: Text('Please log in')));
+                return const LoginScreen();
               }
-              return CalendarPage();
+              return const HomePage(); // Change this line
             }
-            return Scaffold(body: Center(child: CircularProgressIndicator()));
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
           },
         );
       },

@@ -9,7 +9,7 @@ class ShiftDialog extends StatefulWidget {
   final List<ShiftPeriod> shiftPeriods;
   final Function(String, TimeOfDay, TimeOfDay, String, String) onSave;
 
-  ShiftDialog({
+  const ShiftDialog({super.key, 
     this.shift,
     required this.shiftPeriods,
     required this.onSave,
@@ -47,7 +47,7 @@ class _ShiftDialogState extends State<ShiftDialog> {
           children: [
             DropdownButtonFormField<ShiftPeriod>(
               value: _selectedPeriod,
-              hint: Text('Select Shift Period'),
+              hint: const Text('Select Shift Period'),
               isExpanded: true,
               items: widget.shiftPeriods.map((ShiftPeriod period) {
                 return DropdownMenuItem<ShiftPeriod>(
@@ -64,17 +64,17 @@ class _ShiftDialogState extends State<ShiftDialog> {
                 }
               },
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             TextField(
               controller: _titleController,
-              decoration: InputDecoration(labelText: 'Shift Title'),
+              decoration: const InputDecoration(labelText: 'Shift Title'),
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Consumer<EmployeeProvider>(
               builder: (context, employeeProvider, child) {
                 return DropdownButtonFormField<String>(
                   value: _selectedEmployeeId,
-                  hint: Text('Select Employee'),
+                  hint: const Text('Select Employee'),
                   isExpanded: true,
                   items: employeeProvider.employees.map((employee) {
                     return DropdownMenuItem<String>(
@@ -95,11 +95,11 @@ class _ShiftDialogState extends State<ShiftDialog> {
       ),
       actions: [
         TextButton(
-          child: Text('Cancel'),
+          child: const Text('Cancel'),
           onPressed: () => Navigator.of(context).pop(),
         ),
         TextButton(
-          child: Text('Save'),
+          child: const Text('Save'),
           onPressed: () {
             if (_selectedPeriod != null && _selectedEmployeeId != null) {
               widget.onSave(
@@ -112,7 +112,7 @@ class _ShiftDialogState extends State<ShiftDialog> {
               Navigator.of(context).pop();
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Please select a shift period and an employee')),
+                const SnackBar(content: Text('Please select a shift period and an employee')),
               );
             }
           },

@@ -45,10 +45,10 @@ class AuthService with ChangeNotifier {
           throw ErrorHandler.handleAuthError(e);
         },
         codeSent: (String verificationId, int? resendToken) {
-          // TODO: Implement code sent handling
+          // Implement code sent handling in the UI
         },
         codeAutoRetrievalTimeout: (String verificationId) {
-          // TODO: Implement timeout handling
+          // Implement timeout handling in the UI
         },
       );
     } catch (e) {

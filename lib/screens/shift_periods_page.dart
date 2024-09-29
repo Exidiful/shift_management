@@ -6,14 +6,16 @@ import '../models/shift_period.dart';
 import '../widgets/shift_period_dialog.dart';
 
 class ShiftPeriodsPage extends StatelessWidget {
+  const ShiftPeriodsPage({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Shift Periods')),
+      appBar: AppBar(title: const Text('Shift Periods')),
       body: Consumer2<ShiftProvider, TeamProvider>(
         builder: (context, shiftProvider, teamProvider, child) {
           if (shiftProvider.isLoading || teamProvider.isLoading) {
-            return Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator());
           }
           return ListView.builder(
             itemCount: shiftProvider.shiftPeriods.length,
@@ -34,13 +36,13 @@ class ShiftPeriodsPage extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    SizedBox(width: 8),
+                    const SizedBox(width: 8),
                     IconButton(
-                      icon: Icon(Icons.edit),
+                      icon: const Icon(Icons.edit),
                       onPressed: () => _editShiftPeriod(context, shiftProvider, teamProvider, period),
                     ),
                     IconButton(
-                      icon: Icon(Icons.delete),
+                      icon: const Icon(Icons.delete),
                       onPressed: () => _deleteShiftPeriod(context, shiftProvider, period),
                     ),
                   ],
@@ -51,7 +53,7 @@ class ShiftPeriodsPage extends StatelessWidget {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        child: Icon(Icons.add),
+        child: const Icon(Icons.add),
         onPressed: () => _addShiftPeriod(context),
       ),
     );
@@ -101,15 +103,15 @@ class ShiftPeriodsPage extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Delete Shift Period'),
-        content: Text('Are you sure you want to delete this shift period?'),
+        title: const Text('Delete Shift Period'),
+        content: const Text('Are you sure you want to delete this shift period?'),
         actions: [
           TextButton(
-            child: Text('Cancel'),
+            child: const Text('Cancel'),
             onPressed: () => Navigator.of(context).pop(),
           ),
           TextButton(
-            child: Text('Delete'),
+            child: const Text('Delete'),
             onPressed: () {
               provider.deleteShiftPeriod(period.id!);
               Navigator.of(context).pop();

@@ -6,7 +6,7 @@ class EmployeeDialog extends StatefulWidget {
   final Employee? employee;
   final Function(Employee) onSave;
 
-  EmployeeDialog({this.employee, required this.onSave});
+  const EmployeeDialog({super.key, this.employee, required this.onSave});
 
   @override
   _EmployeeDialogState createState() => _EmployeeDialogState();
@@ -32,7 +32,7 @@ class _EmployeeDialogState extends State<EmployeeDialog> {
     return AlertDialog(
       title: Text(
         widget.employee == null ? 'Add Employee' : 'Edit Employee',
-        style: TextStyle(fontWeight: FontWeight.w300),
+        style: const TextStyle(fontWeight: FontWeight.w300),
       ),
       content: SingleChildScrollView(
         child: Column(
@@ -47,11 +47,10 @@ class _EmployeeDialogState extends State<EmployeeDialog> {
       ),
       actions: [
         TextButton(
-          child: Text('Cancel', style: TextStyle(color: AppTheme.accentColor)),
+          child: const Text('Cancel', style: TextStyle(color: AppTheme.accentColor)),
           onPressed: () => Navigator.of(context).pop(),
         ),
         ElevatedButton(
-          child: Text('Save'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppTheme.primaryColor,
             foregroundColor: AppTheme.accentColor,
@@ -71,6 +70,7 @@ class _EmployeeDialogState extends State<EmployeeDialog> {
             widget.onSave(employee);
             Navigator.of(context).pop();
           },
+          child: Text('Save'),
         ),
       ],
     );
@@ -82,7 +82,7 @@ class _EmployeeDialogState extends State<EmployeeDialog> {
       decoration: InputDecoration(
         labelText: label,
         labelStyle: TextStyle(color: AppTheme.primaryColor.withOpacity(0.6)),
-        focusedBorder: UnderlineInputBorder(
+        focusedBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: AppTheme.primaryColor),
         ),
       ),

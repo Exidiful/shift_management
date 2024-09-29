@@ -9,7 +9,7 @@ class ShiftPeriodDialog extends StatefulWidget {
   final List<Team> teams;
   final Function(String, TimeOfDay, TimeOfDay, Color, String) onSave;
 
-  ShiftPeriodDialog({
+  const ShiftPeriodDialog({super.key, 
     this.shiftPeriod,
     required this.teams,
     required this.onSave,
@@ -30,8 +30,8 @@ class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.shiftPeriod?.name ?? '');
-    _startTime = widget.shiftPeriod?.startTime ?? TimeOfDay(hour: 9, minute: 0);
-    _endTime = widget.shiftPeriod?.endTime ?? TimeOfDay(hour: 17, minute: 0);
+    _startTime = widget.shiftPeriod?.startTime ?? const TimeOfDay(hour: 9, minute: 0);
+    _endTime = widget.shiftPeriod?.endTime ?? const TimeOfDay(hour: 17, minute: 0);
     _color = widget.shiftPeriod?.color ?? Colors.blue;
     _selectedTeamId = widget.shiftPeriod?.teamId;
   }
@@ -46,25 +46,24 @@ class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
           children: [
             TextField(
               controller: _nameController,
-              decoration: InputDecoration(labelText: 'Period Name'),
+              decoration: const InputDecoration(labelText: 'Period Name'),
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             _buildTimePicker('Start Time', _startTime, (time) => setState(() => _startTime = time)),
             _buildTimePicker('End Time', _endTime, (time) => setState(() => _endTime = time)),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             _buildColorPicker(),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             _buildTeamDropdown(),
           ],
         ),
       ),
       actions: [
         TextButton(
-          child: Text('Cancel'),
+          child: const Text('Cancel'),
           onPressed: () => Navigator.of(context).pop(),
         ),
         ElevatedButton(
-          child: Text('Save'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppTheme.primaryColor,
             foregroundColor: AppTheme.accentColor,
@@ -81,10 +80,11 @@ class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
               Navigator.of(context).pop();
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Please select a team')),
+                const SnackBar(content: Text('Please select a team')),
               );
             }
           },
+          child: Text('Save'),
         ),
       ],
     );
@@ -115,7 +115,7 @@ class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text('Color'),
+        const Text('Color'),
         GestureDetector(
           onTap: () {
             showDialog(
@@ -161,7 +161,7 @@ class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
   Widget _buildTeamDropdown() {
     return DropdownButtonFormField<String>(
       value: _selectedTeamId,
-      hint: Text('Select Team'),
+      hint: const Text('Select Team'),
       items: widget.teams.map((Team team) {
         return DropdownMenuItem<String>(
           value: team.id,
@@ -173,7 +173,7 @@ class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
           _selectedTeamId = newValue;
         });
       },
-      decoration: InputDecoration(labelText: 'Team'),
+      decoration: const InputDecoration(labelText: 'Team'),
     );
   }
 
