@@ -1,0 +1,360 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'models.dart';
+import 'main.dart' show ShiftProvider;
+import 'models/shift_period.dart';
+import 'models/team.dart';
+import 'providers/shift_provider.dart';
+import 'providers/team_provider.dart';
+
+class ShiftPeriodsPage extends StatefulWidget {
+  @override
+  _ShiftPeriodsPageState createState() => _ShiftPeriodsPageState();
+}
+
+class _ShiftPeriodsPageState extends State<ShiftPeriodsPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<ShiftProvider>(context, listen: false).fetchShiftPeriods();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Shift Periods'),
+      ),
+      body: Consumer2<ShiftProvider, TeamProvider>(
+        builder: (context, shiftProvider, teamProvider, child) {
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth > 600) {
+                // For larger screens, use a grid view
+                return GridView.builder(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: constraints.maxWidth > 900 ? 3 : 2,
+                    childAspectRatio: 3,
+                  ),
+                  itemCount: shiftProvider.shiftPeriods.length,
+                  itemBuilder: (context, index) {
+                    return _buildShiftPeriodItem(shiftProvider.shiftPeriods[index], teamProvider, shiftProvider, constraints);
+                  },
+                );
+              } else {
+                // For smaller screens, use a list view
+                return ListView.builder(
+                  itemCount: shiftProvider.shiftPeriods.length,
+                  itemBuilder: (context, index) {
+                    return _buildShiftPeriodItem(shiftProvider.shiftPeriods[index], teamProvider, shiftProvider, constraints);
+                  },
+                );
+              }
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: () => _addShiftPeriod(context),
+      ),
+    );
+  }
+
+  Widget _buildShiftPeriodItem(ShiftPeriod period, TeamProvider teamProvider, ShiftProvider shiftProvider, BoxConstraints constraints) {
+    final team = teamProvider.teams.firstWhere(
+      (team) => team.id == period.teamId,
+      orElse: () => Team(id: '', name: 'Unknown Team', description: '', employeeIds: []),
+    );
+    return Card(
+      child: ListTile(
+        title: Text(period.name, style: TextStyle(fontSize: constraints.maxWidth > 600 ? 18 : 16)),
+        subtitle: Text(
+          '${period.startTime.format(context)} - ${period.endTime.format(context)}\nTeam: ${team.name}',
+          style: TextStyle(fontSize: constraints.maxWidth > 600 ? 14 : 12),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: constraints.maxWidth > 600 ? 30 : 24,
+              height: constraints.maxWidth > 600 ? 30 : 24,
+              decoration: BoxDecoration(
+                color: period.color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            SizedBox(width: 8),
+            IconButton(
+              icon: Icon(Icons.edit),
+              onPressed: () => _editShiftPeriod(context, shiftProvider, teamProvider, period),
+            ),
+            IconButton(
+              icon: Icon(Icons.delete),
+              onPressed: () => _deleteShiftPeriod(context, shiftProvider, period),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _addShiftPeriod(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => ShiftPeriodDialog(
+        onSave: (name, startTime, endTime, color, teamId) {
+          final period = ShiftPeriod(name: name, startTime: startTime, endTime: endTime, color: color, teamId: teamId);
+          Provider.of<ShiftProvider>(context, listen: false).addShiftPeriod(period).catchError((error) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error adding shift period: $error')),
+            );
+          });
+        },
+      ),
+    );
+  }
+
+  void _editShiftPeriod(BuildContext context, ShiftProvider provider, TeamProvider teamProvider, ShiftPeriod period) {
+    showDialog(
+      context: context,
+      builder: (context) => ShiftPeriodDialog(
+        initialName: period.name,
+        initialStartTime: period.startTime,
+        initialEndTime: period.endTime,
+        initialColor: period.color,
+        initialTeamId: period.teamId,
+        onSave: (name, startTime, endTime, color, teamId) {
+          final updatedPeriod = ShiftPeriod(
+            id: period.id,
+            name: name,
+            startTime: startTime,
+            endTime: endTime,
+            color: color,
+            teamId: teamId,
+          );
+          provider.updateShiftPeriod(updatedPeriod).catchError((error) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error updating shift period: $error')),
+            );
+          });
+        },
+      ),
+    );
+  }
+
+  void _deleteShiftPeriod(BuildContext context, ShiftProvider provider, ShiftPeriod period) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Shift Period'),
+        content: Text('Are you sure you want to delete this shift period?'),
+        actions: [
+          TextButton(
+            child: Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('Delete'),
+            onPressed: () {
+              provider.deleteShiftPeriod(period.id!).catchError((error) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error deleting shift period: $error')),
+                );
+              });
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ShiftPeriodDialog extends StatefulWidget {
+  final String? initialName;
+  final TimeOfDay? initialStartTime;
+  final TimeOfDay? initialEndTime;
+  final Color? initialColor;
+  final String? initialTeamId;
+  final Function(String, TimeOfDay, TimeOfDay, Color, String) onSave;
+
+  ShiftPeriodDialog({
+    this.initialName,
+    this.initialStartTime,
+    this.initialEndTime,
+    this.initialColor,
+    this.initialTeamId,
+    required this.onSave,
+  });
+
+  @override
+  _ShiftPeriodDialogState createState() => _ShiftPeriodDialogState();
+}
+
+class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
+  late TextEditingController _nameController;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late Color _color;
+  String? _selectedTeamId;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _startTime = widget.initialStartTime ?? TimeOfDay(hour: 9, minute: 0);
+    _endTime = widget.initialEndTime ?? TimeOfDay(hour: 17, minute: 0);
+    _color = widget.initialColor ?? Colors.blue;
+    _selectedTeamId = widget.initialTeamId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.initialName == null ? 'Add Shift Period' : 'Edit Shift Period'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: 'Period Name'),
+            ),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Start Time'),
+                TextButton(
+                  child: Text(_startTime.format(context)),
+                  onPressed: () async {
+                    final TimeOfDay? time = await showTimePicker(
+                      context: context,
+                      initialTime: _startTime,
+                    );
+                    if (time != null) {
+                      setState(() => _startTime = time);
+                    }
+                  },
+                ),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('End Time'),
+                TextButton(
+                  child: Text(_endTime.format(context)),
+                  onPressed: () async {
+                    final TimeOfDay? time = await showTimePicker(
+                      context: context,
+                      initialTime: _endTime,
+                    );
+                    if (time != null) {
+                      setState(() => _endTime = time);
+                    }
+                  },
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Color'),
+                GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext context) {
+                        return AlertDialog(
+                          title: const Text('Pick a color'),
+                          content: SingleChildScrollView(
+                            child: ColorPicker(
+                              pickerColor: _color,
+                              onColorChanged: (Color color) {
+                                setState(() => _color = color);
+                              },
+                              showLabel: true,
+                              pickerAreaHeightPercent: 0.8,
+                            ),
+                          ),
+                          actions: <Widget>[
+                            TextButton(
+                              child: const Text('OK'),
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                              },
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            Consumer<TeamProvider>(
+              builder: (context, teamProvider, child) {
+                return DropdownButtonFormField<String>(
+                  value: _selectedTeamId,
+                  hint: Text('Select Team'),
+                  items: teamProvider.teams.map((Team team) {
+                    return DropdownMenuItem<String>(
+                      value: team.id,
+                      child: Text(team.name),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    setState(() {
+                      _selectedTeamId = newValue;
+                    });
+                  },
+                  decoration: InputDecoration(labelText: 'Team'),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Save'),
+          onPressed: () {
+            if (_selectedTeamId != null) {
+              widget.onSave(_nameController.text, _startTime, _endTime, _color, _selectedTeamId!);
+              Navigator.of(context).pop();
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Please select a team')),
+              );
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+}

@@ -1,0 +1,3205 @@
+
+auth_service.dart
+```dart
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'models.dart';
+
+class AuthService with ChangeNotifier {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  User? get currentUser => _auth.currentUser;
+
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  Future<void> signInWithEmailAndPassword(String email, String password) async {
+    try {
+      await _auth.signInWithEmailAndPassword(email: email, password: password);
+      await _checkAndCreateEmployeeDocument();
+      notifyListeners();
+    } on FirebaseAuthException catch (e) {
+      throw e.message ?? 'An error occurred during sign in';
+    }
+  }
+
+  Future<void> createUserWithEmailAndPassword(String email, String password, String name, String position) async {
+    try {
+      final UserCredential userCredential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
+      await _createEmployeeDocument(userCredential.user!.uid, email, name, position);
+      notifyListeners();
+    } on FirebaseAuthException catch (e) {
+      throw e.message ?? 'An error occurred during registration';
+    }
+  }
+
+  Future<void> signInWithPhoneNumber(String phoneNumber) async {
+    try {
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phoneNumber,
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          await _auth.signInWithCredential(credential);
+          await _checkAndCreateEmployeeDocument();
+          notifyListeners();
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          throw e.message ?? 'An error occurred during phone verification';
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          // Handle code sent (you might want to navigate to a code entry screen here)
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {
+          // Handle timeout
+        },
+      );
+    } catch (e) {
+      throw 'An error occurred during phone sign in';
+    }
+  }
+
+  Future<void> _checkAndCreateEmployeeDocument() async {
+    final User? user = _auth.currentUser;
+    if (user != null) {
+      final docSnapshot = await _firestore.collection('employees').doc(user.uid).get();
+      if (!docSnapshot.exists) {
+        await _createEmployeeDocument(user.uid, user.email ?? '', 'New Employee', 'Unassigned');
+      }
+    }
+  }
+
+  Future<void> _createEmployeeDocument(String uid, String email, String name, String position) async {
+    final employee = Employee(
+      id: uid,
+      name: name,
+      position: position,
+      email: email,
+      phoneNumber: _auth.currentUser?.phoneNumber ?? '',
+    );
+    await _firestore.collection('employees').doc(uid).set(employee.toJson());
+  }
+
+  Future<void> signOut() async {
+    await _auth.signOut();
+    notifyListeners();
+  }
+}
+```
+
+employee_management_page.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'models.dart';
+
+class EmployeeManagementPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('Employee & Team Management'),
+          bottom: TabBar(
+            tabs: [
+              Tab(text: 'Employees'),
+              Tab(text: 'Teams'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            EmployeeListView(),
+            TeamListView(),
+          ],
+        ),
+        floatingActionButton: Builder(
+          builder: (context) => FloatingActionButton(
+            child: Icon(Icons.add),
+            onPressed: () {
+              if (DefaultTabController.of(context).index == 0) {
+                _addEmployee(context);
+              } else {
+                _addTeam(context);
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _addEmployee(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => EmployeeDialog(
+        onSave: (employee) {
+          Provider.of<EmployeeProvider>(context, listen: false).addEmployee(employee);
+        },
+      ),
+    );
+  }
+
+  void _addTeam(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => TeamDialog(
+        onSave: (team) {
+          Provider.of<TeamProvider>(context, listen: false).addTeam(team);
+        },
+      ),
+    );
+  }
+}
+
+class EmployeeListView extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<EmployeeProvider>(
+      builder: (context, employeeProvider, child) {
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth > 600) {
+              // For larger screens, use a grid view
+              return GridView.builder(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: constraints.maxWidth > 900 ? 3 : 2,
+                  childAspectRatio: 3,
+                ),
+                itemCount: employeeProvider.employees.length,
+                itemBuilder: (context, index) {
+                  return _buildEmployeeItem(context, employeeProvider.employees[index], constraints);
+                },
+              );
+            } else {
+              // For smaller screens, use a list view
+              return ListView.builder(
+                itemCount: employeeProvider.employees.length,
+                itemBuilder: (context, index) {
+                  return _buildEmployeeItem(context, employeeProvider.employees[index], constraints);
+                },
+              );
+            }
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildEmployeeItem(BuildContext context, Employee employee, BoxConstraints constraints) {
+    return Card(
+      child: ListTile(
+        title: Text(employee.name, style: TextStyle(fontSize: constraints.maxWidth > 600 ? 18 : 16)),
+        subtitle: Text(employee.position, style: TextStyle(fontSize: constraints.maxWidth > 600 ? 14 : 12)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(Icons.edit),
+              onPressed: () => _editEmployee(context, employee),
+            ),
+            IconButton(
+              icon: Icon(Icons.delete),
+              onPressed: () => _deleteEmployee(context, employee),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _editEmployee(BuildContext context, Employee employee) {
+    showDialog(
+      context: context,
+      builder: (context) => EmployeeDialog(
+        employee: employee,
+        onSave: (updatedEmployee) {
+          Provider.of<EmployeeProvider>(context, listen: false).updateEmployee(updatedEmployee);
+        },
+      ),
+    );
+  }
+
+  void _deleteEmployee(BuildContext context, Employee employee) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Employee'),
+        content: Text('Are you sure you want to delete ${employee.name}?'),
+        actions: [
+          TextButton(
+            child: Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('Delete'),
+            onPressed: () {
+              Provider.of<EmployeeProvider>(context, listen: false).deleteEmployee(employee);
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class TeamListView extends StatefulWidget {
+  @override
+  _TeamListViewState createState() => _TeamListViewState();
+}
+
+class _TeamListViewState extends State<TeamListView> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<TeamProvider>(context, listen: false).fetchTeams();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer2<TeamProvider, EmployeeProvider>(
+      builder: (context, teamProvider, employeeProvider, child) {
+        if (teamProvider.teams.isEmpty) {
+          return Center(child: CircularProgressIndicator());
+        }
+        return ListView.builder(
+          itemCount: teamProvider.teams.length,
+          itemBuilder: (context, index) {
+            final team = teamProvider.teams[index];
+            final manager = employeeProvider.employees.firstWhere(
+              (e) => e.id == team.managerId,
+              orElse: () => Employee(id: '', name: 'No Manager', position: '', phoneNumber: '', email: ''),
+            );
+            final teamMembers = employeeProvider.employees.where((e) => team.employeeIds.contains(e.id)).toList();
+            return ExpansionTile(
+              title: Text(team.name),
+              subtitle: Text(team.description),
+              children: [
+                ListTile(
+                  title: Text('Manager: ${manager.name}'),
+                  trailing: IconButton(
+                    icon: Icon(Icons.edit),
+                    onPressed: () => _assignManager(context, team),
+                  ),
+                ),
+                ...teamMembers.map((e) => ListTile(
+                      title: Text(e.name),
+                      subtitle: Text(e.position),
+                      trailing: IconButton(
+                        icon: Icon(Icons.remove),
+                        onPressed: () => _removeEmployeeFromTeam(context, team, e),
+                      ),
+                    )),
+                ListTile(
+                  title: Text('Add Team Member'),
+                  trailing: IconButton(
+                    icon: Icon(Icons.add),
+                    onPressed: () => _addEmployeeToTeam(context, team),
+                  ),
+                ),
+              ],
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.edit),
+                    onPressed: () => _editTeam(context, team),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.delete),
+                    onPressed: () => _deleteTeam(context, team),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _editTeam(BuildContext context, Team team) {
+    showDialog(
+      context: context,
+      builder: (context) => TeamDialog(
+        team: team,
+        onSave: (updatedTeam) {
+          Provider.of<TeamProvider>(context, listen: false).updateTeam(updatedTeam);
+        },
+      ),
+    );
+  }
+
+  void _deleteTeam(BuildContext context, Team team) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Team'),
+        content: Text('Are you sure you want to delete ${team.name}?'),
+        actions: [
+          TextButton(
+            child: Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('Delete'),
+            onPressed: () {
+              Provider.of<TeamProvider>(context, listen: false).deleteTeam(team);
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _assignManager(BuildContext context, Team team) {
+    showDialog(
+      context: context,
+      builder: (context) => AssignManagerDialog(
+        team: team,
+        onAssign: (managerId) {
+          final updatedTeam = Team(
+            id: team.id,
+            name: team.name,
+            description: team.description,
+            employeeIds: team.employeeIds,
+            managerId: managerId,
+          );
+          Provider.of<TeamProvider>(context, listen: false).updateTeam(updatedTeam);
+        },
+      ),
+    );
+  }
+
+  void _addEmployeeToTeam(BuildContext context, Team team) {
+    showDialog(
+      context: context,
+      builder: (context) => AddEmployeeToTeamDialog(
+        team: team,
+        onAdd: (employeeId) {
+          final updatedTeam = Team(
+            id: team.id,
+            name: team.name,
+            description: team.description,
+            employeeIds: [...team.employeeIds, employeeId],
+            managerId: team.managerId,
+          );
+          Provider.of<TeamProvider>(context, listen: false).updateTeam(updatedTeam);
+        },
+      ),
+    );
+  }
+
+  void _removeEmployeeFromTeam(BuildContext context, Team team, Employee employee) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove Employee from Team'),
+        content: Text('Are you sure you want to remove ${employee.name} from ${team.name}?'),
+        actions: [
+          TextButton(
+            child: Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('Remove'),
+            onPressed: () {
+              final updatedTeam = Team(
+                id: team.id,
+                name: team.name,
+                description: team.description,
+                employeeIds: team.employeeIds.where((id) => id != employee.id).toList(),
+                managerId: team.managerId,
+              );
+              Provider.of<TeamProvider>(context, listen: false).updateTeam(updatedTeam);
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class EmployeeDialog extends StatefulWidget {
+  final Employee? employee;
+  final Function(Employee) onSave;
+
+  EmployeeDialog({this.employee, required this.onSave});
+
+  @override
+  _EmployeeDialogState createState() => _EmployeeDialogState();
+}
+
+class _EmployeeDialogState extends State<EmployeeDialog> {
+  late TextEditingController _nameController;
+  late TextEditingController _positionController;
+  late TextEditingController _emailController;
+  late TextEditingController _phoneController;
+  String? _selectedTeamId;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.employee?.name ?? '');
+    _positionController = TextEditingController(text: widget.employee?.position ?? '');
+    _emailController = TextEditingController(text: widget.employee?.email ?? '');
+    _phoneController = TextEditingController(text: widget.employee?.phoneNumber ?? '');
+    _selectedTeamId = widget.employee?.teamId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.employee == null ? 'Add Employee' : 'Edit Employee'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: 'Name'),
+            ),
+            TextField(
+              controller: _positionController,
+              decoration: InputDecoration(labelText: 'Position'),
+            ),
+            TextField(
+              controller: _emailController,
+              decoration: InputDecoration(labelText: 'Email'),
+            ),
+            TextField(
+              controller: _phoneController,
+              decoration: InputDecoration(labelText: 'Phone Number'),
+            ),
+            Consumer<TeamProvider>(
+              builder: (context, teamProvider, child) {
+                return DropdownButtonFormField<String>(
+                  value: _selectedTeamId,
+                  items: [
+                    DropdownMenuItem<String>(
+                      value: null,
+                      child: Text('No Team'),
+                    ),
+                    ...teamProvider.teams.map((team) {
+                      return DropdownMenuItem<String>(
+                        value: team.id,
+                        child: Text(team.name),
+                      );
+                    }).toList(),
+                  ],
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedTeamId = value;
+                    });
+                  },
+                  decoration: InputDecoration(labelText: 'Team'),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Save'),
+          onPressed: () {
+            final employee = Employee(
+              id: widget.employee?.id ?? '',
+              name: _nameController.text,
+              position: _positionController.text,
+              email: _emailController.text,
+              phoneNumber: _phoneController.text,
+              teamId: _selectedTeamId,
+            );
+            widget.onSave(employee);
+            Navigator.of(context).pop();
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _positionController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+}
+
+class TeamDialog extends StatefulWidget {
+  final Team? team;
+  final Function(Team) onSave;
+
+  TeamDialog({this.team, required this.onSave});
+
+  @override
+  _TeamDialogState createState() => _TeamDialogState();
+}
+
+class _TeamDialogState extends State<TeamDialog> {
+  late TextEditingController _nameController;
+  late TextEditingController _descriptionController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.team?.name ?? '');
+    _descriptionController = TextEditingController(text: widget.team?.description ?? '');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.team == null ? 'Add Team' : 'Edit Team'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: 'Name'),
+            ),
+            TextField(
+              controller: _descriptionController,
+              decoration: InputDecoration(labelText: 'Description'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Save'),
+          onPressed: () {
+            final team = Team(
+              id: widget.team?.id ?? '', // Use empty string for new teams
+              name: _nameController.text,
+              description: _descriptionController.text,
+              employeeIds: widget.team?.employeeIds ?? [],
+              managerId: widget.team?.managerId,
+            );
+            widget.onSave(team);
+            Navigator.of(context).pop();
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+}
+
+class AssignManagerDialog extends StatefulWidget {
+  final Team team;
+  final Function(String?) onAssign;
+
+  AssignManagerDialog({required this.team, required this.onAssign});
+
+  @override
+  _AssignManagerDialogState createState() => _AssignManagerDialogState();
+}
+
+class _AssignManagerDialogState extends State<AssignManagerDialog> {
+  String? _selectedManagerId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedManagerId = widget.team.managerId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Assign Manager'),
+      content: Consumer<EmployeeProvider>(
+        builder: (context, employeeProvider, child) {
+          return DropdownButtonFormField<String>(
+            value: _selectedManagerId,
+            items: [
+              DropdownMenuItem<String>(
+                value: null,
+                child: Text('No Manager'),
+              ),
+              ...employeeProvider.employees.map((employee) {
+                return DropdownMenuItem<String>(
+                  value: employee.id,
+                  child: Text(employee.name),
+                );
+              }).toList(),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _selectedManagerId = value;
+              });
+            },
+            decoration: InputDecoration(labelText: 'Manager'),
+          );
+        },
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Assign'),
+          onPressed: () {
+            widget.onAssign(_selectedManagerId);
+            Navigator.of(context).pop();
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class AddEmployeeToTeamDialog extends StatefulWidget {
+  final Team team;
+  final Function(String) onAdd;
+
+  AddEmployeeToTeamDialog({required this.team, required this.onAdd});
+
+  @override
+  _AddEmployeeToTeamDialogState createState() => _AddEmployeeToTeamDialogState();
+}
+
+class _AddEmployeeToTeamDialogState extends State<AddEmployeeToTeamDialog> {
+  String? _selectedEmployeeId;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Add Employee to Team'),
+      content: Consumer<EmployeeProvider>(
+        builder: (context, employeeProvider, child) {
+          final availableEmployees = employeeProvider.employees
+              .where((e) => !widget.team.employeeIds.contains(e.id))
+              .toList();
+          return DropdownButtonFormField<String>(
+            value: _selectedEmployeeId,
+            items: availableEmployees.map((employee) {
+              return DropdownMenuItem<String>(
+                value: employee.id,
+                child: Text(employee.name),
+              );
+            }).toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedEmployeeId = value;
+              });
+            },
+            decoration: InputDecoration(labelText: 'Employee'),
+          );
+        },
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Add'),
+          onPressed: () {
+            if (_selectedEmployeeId != null) {
+              widget.onAdd(_selectedEmployeeId!);
+              Navigator.of(context).pop();
+            }
+          },
+        ),
+      ],
+    );
+  }
+}
+```
+
+firebase_options.dart
+```dart
+// File generated by FlutterFire CLI.
+// ignore_for_file: type=lint
+import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
+
+/// Default [FirebaseOptions] for use with your Firebase apps.
+///
+/// Example:
+/// ```dart
+/// import 'firebase_options.dart';
+/// // ...
+/// await Firebase.initializeApp(
+///   options: DefaultFirebaseOptions.currentPlatform,
+/// );
+/// ```
+class DefaultFirebaseOptions {
+  static FirebaseOptions get currentPlatform {
+    if (kIsWeb) {
+      return web;
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return android;
+      case TargetPlatform.iOS:
+        return ios;
+      case TargetPlatform.macOS:
+        return macos;
+      case TargetPlatform.windows:
+        return windows;
+      case TargetPlatform.linux:
+        throw UnsupportedError(
+          'DefaultFirebaseOptions have not been configured for linux - '
+          'you can reconfigure this by running the FlutterFire CLI again.',
+        );
+      default:
+        throw UnsupportedError(
+          'DefaultFirebaseOptions are not supported for this platform.',
+        );
+    }
+  }
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyDXYAKkeh34b1NCnziNnb2P0sNSaeSgLBM',
+    appId: '1:78950313539:web:11c03a35f2ed46fd23eef6',
+    messagingSenderId: '78950313539',
+    projectId: 'testdb-9897c',
+    authDomain: 'testdb-9897c.firebaseapp.com',
+    storageBucket: 'testdb-9897c.appspot.com',
+  );
+
+  static const FirebaseOptions android = FirebaseOptions(
+    apiKey: 'AIzaSyDzWMI1GwJIuEEfkCONrvJjlYNDr0SHjXc',
+    appId: '1:78950313539:android:1c1579462b5eff5323eef6',
+    messagingSenderId: '78950313539',
+    projectId: 'testdb-9897c',
+    storageBucket: 'testdb-9897c.appspot.com',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyDbYoSNwsnndMvy5xjNXKp1-YLpJjFQISQ',
+    appId: '1:78950313539:ios:0c7964362b6f5a8323eef6',
+    messagingSenderId: '78950313539',
+    projectId: 'testdb-9897c',
+    storageBucket: 'testdb-9897c.appspot.com',
+    iosBundleId: 'com.example.shiftManager',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyDbYoSNwsnndMvy5xjNXKp1-YLpJjFQISQ',
+    appId: '1:78950313539:ios:0c7964362b6f5a8323eef6',
+    messagingSenderId: '78950313539',
+    projectId: 'testdb-9897c',
+    storageBucket: 'testdb-9897c.appspot.com',
+    iosBundleId: 'com.example.shiftManager',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyDYqhlOB9WXXJp_U6dRQWRdQtZPk-0naWM',
+    appId: '1:78950313539:web:6dc1ae7cca0e488923eef6',
+    messagingSenderId: '78950313539',
+    projectId: 'testdb-9897c',
+    authDomain: 'testdb-9897c.firebaseapp.com',
+    storageBucket: 'testdb-9897c.appspot.com',
+  );
+}
+
+```
+
+main.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'providers/shift_provider.dart';
+import 'providers/employee_provider.dart';
+import 'providers/team_provider.dart';
+import 'services/auth_service.dart';
+import 'screens/calendar_page.dart';
+import 'firebase_options.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider(create: (_) => ShiftProvider()),
+        ChangeNotifierProvider(create: (_) => EmployeeProvider()),
+        ChangeNotifierProvider(create: (_) => TeamProvider()),
+      ],
+      child: MyApp(),
+    ),
+  );
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Shift Calendar',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: CalendarPage(),
+    );
+  }
+}
+```
+
+models.dart
+```dart
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class Employee {
+  final String id;
+  final String name;
+  final String position;
+  final String? teamId;
+  final String email;
+  final String phoneNumber;
+
+  Employee({
+    required this.id,
+    required this.name,
+    required this.position,
+    this.teamId,
+    required this.email,
+    required this.phoneNumber,
+  });
+
+  factory Employee.fromJson(Map<String, dynamic> json) {
+    return Employee(
+      id: json['id'],
+      name: json['name'],
+      position: json['position'],
+      teamId: json['teamId'],
+      email: json['email'] ?? "",
+      phoneNumber: json['phoneNumber'] ?? "",
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'position': position,
+      'teamId': teamId,
+      'email': email,
+      'phoneNumber': phoneNumber,
+    };
+  }
+}
+
+class Team {
+  final String id;
+  final String name;
+  final String description;
+  final List<String> employeeIds;
+  final String? managerId;
+
+  Team({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.employeeIds,
+    this.managerId,
+  });
+
+  factory Team.fromJson(Map<String, dynamic> json) {
+    return Team(
+      id: json['id'],
+      name: json['name'],
+      description: json['description'],
+      employeeIds: List<String>.from(json['employeeIds']),
+      managerId: json['managerId'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'employeeIds': employeeIds,
+      'managerId': managerId,
+    };
+  }
+}
+
+class ShiftPeriod {
+  String? id;
+  String name;
+  TimeOfDay startTime;
+  TimeOfDay endTime;
+  Color color;
+  String teamId;
+
+  ShiftPeriod({
+    this.id,
+    required this.name,
+    required this.startTime,
+    required this.endTime,
+    required this.color,
+    required this.teamId,
+  });
+
+  factory ShiftPeriod.fromMap(Map<String, dynamic> map, String id) {
+    return ShiftPeriod(
+      id: id,
+      name: map['name'] ?? '',
+      startTime: TimeOfDay(
+        hour: map['startHour'] ?? 0,
+        minute: map['startMinute'] ?? 0,
+      ),
+      endTime: TimeOfDay(
+        hour: map['endHour'] ?? 0,
+        minute: map['endMinute'] ?? 0,
+      ),
+      color: Color(map['color'] ?? 0xFF000000), // Default to black if color is null
+      teamId: map['teamId'] ?? '',
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'startHour': startTime.hour,
+      'startMinute': startTime.minute,
+      'endHour': endTime.hour,
+      'endMinute': endTime.minute,
+      'color': color.value,
+      'teamId': teamId,
+    };
+  }
+}
+
+class Shift {
+  String? id;
+  DateTime date;
+  String title;
+  TimeOfDay startTime;
+  TimeOfDay endTime;
+  String employeeId;
+  String shiftPeriodId;  // Add this line
+
+  Shift({
+    this.id,
+    required this.date,
+    required this.title,
+    required this.startTime,
+    required this.endTime,
+    required this.employeeId,
+    required this.shiftPeriodId,  // Add this line
+  });
+
+  factory Shift.fromMap(Map<String, dynamic> map, String id) {
+    return Shift(
+      id: id,
+      date: (map['date'] as Timestamp).toDate(),
+      title: map['title'],
+      startTime: TimeOfDay.fromDateTime(
+          (map['startTime'] as Timestamp).toDate()),
+      endTime: TimeOfDay.fromDateTime(
+          (map['endTime'] as Timestamp).toDate()),
+      employeeId: map['employeeId'] ?? "",
+      shiftPeriodId: map['shiftPeriodId'] ?? "",  // Add this line
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'date': Timestamp.fromDate(date),
+      'title': title,
+      'startTime': Timestamp.fromDate(DateTime(date.year, date.month, date.day,
+          startTime.hour, startTime.minute)),
+      'endTime': Timestamp.fromDate(DateTime(date.year, date.month, date.day,
+          endTime.hour, endTime.minute)),
+      'employeeId': employeeId,
+      'shiftPeriodId': shiftPeriodId,  // Add this line
+    };
+  }
+}
+
+class ShiftProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  Map<DateTime, List<Shift>> _shifts = {};
+  List<ShiftPeriod> _shiftPeriods = [];
+  bool _isLoading = false;
+
+  Map<DateTime, List<Shift>> get shifts => _shifts;
+  List<ShiftPeriod> get shiftPeriods => _shiftPeriods;
+  bool get isLoading => _isLoading;
+
+  Future<void> fetchShiftPeriods() async {
+    if (_shiftPeriods.isNotEmpty) return; // Avoid fetching if data is already loaded
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final QuerySnapshot snapshot = await _firestore.collection('shiftPeriods').get();
+      _shiftPeriods = snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return ShiftPeriod.fromMap(data, doc.id);
+      }).toList();
+      notifyListeners();
+    } catch (e) {
+      print('Error fetching shift periods: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> addShiftPeriod(ShiftPeriod period) async {
+    final docRef =
+        await _firestore.collection('shiftPeriods').add(period.toMap());
+    period.id = docRef.id;
+    _shiftPeriods.add(period);
+    notifyListeners();
+  }
+
+  Future<void> updateShiftPeriod(ShiftPeriod period) async {
+    await _firestore
+        .collection('shiftPeriods')
+        .doc(period.id)
+        .update(period.toMap());
+    final index = _shiftPeriods.indexWhere((p) => p.id == period.id);
+    if (index != -1) {
+      _shiftPeriods[index] = period;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteShiftPeriod(String id) async {
+    await _firestore.collection('shiftPeriods').doc(id).delete();
+    _shiftPeriods.removeWhere((p) => p.id == id);
+    notifyListeners();
+  }
+
+  Future<void> fetchShifts(DateTime month) async {
+    final startOfMonth = DateTime(month.year, month.month, 1);
+    final endOfMonth = DateTime(month.year, month.month + 1, 0);
+
+    final QuerySnapshot snapshot = await _firestore
+        .collection('shifts')
+        .where('date', isGreaterThanOrEqualTo: startOfMonth)
+        .where('date', isLessThanOrEqualTo: endOfMonth)
+        .get();
+
+    _shifts.clear();
+    for (var doc in snapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final shift = Shift.fromMap(data, doc.id);
+      final shiftDate =
+          DateTime(shift.date.year, shift.date.month, shift.date.day);
+      if (_shifts[shiftDate] == null) {
+        _shifts[shiftDate] = [];
+      }
+      _shifts[shiftDate]!.add(shift);
+    }
+    notifyListeners();
+  }
+
+  Future<Shift> addShift(Shift shift) async {
+    final docRef =
+        await _firestore.collection('shifts').add(shift.toMap());
+    shift.id = docRef.id;
+    if (_shifts[shift.date] == null) {
+      _shifts[shift.date] = [];
+    }
+    _shifts[shift.date]!.add(shift);
+    notifyListeners();
+    return shift;
+  }
+
+  Future<void> updateShift(Shift shift) async {
+    await _firestore
+        .collection('shifts')
+        .doc(shift.id)
+        .update(shift.toMap());
+    final index =
+        _shifts[shift.date]!.indexWhere((s) => s.id == shift.id);
+    _shifts[shift.date]![index] = shift;
+    notifyListeners();
+  }
+
+  Future<void> deleteShift(Shift shift) async {
+    await _firestore.collection('shifts').doc(shift.id).delete();
+    _shifts[shift.date]!.removeWhere((s) => s.id == shift.id);
+    notifyListeners();
+  }
+
+  Future<void> fetchEmployeeShifts(String employeeId, DateTime month) async {
+    final startOfMonth = DateTime(month.year, month.month, 1);
+    final endOfMonth = DateTime(month.year, month.month + 1, 0);
+
+    final QuerySnapshot snapshot = await _firestore
+        .collection('shifts')
+        .where('employeeId', isEqualTo: employeeId)
+        .where('date', isGreaterThanOrEqualTo: startOfMonth)
+        .where('date', isLessThanOrEqualTo: endOfMonth)
+        .get();
+
+    _shifts.clear();
+    for (var doc in snapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final shift = Shift.fromMap(data, doc.id);
+      final shiftDate =
+          DateTime(shift.date.year, shift.date.month, shift.date.day);
+      if (_shifts[shiftDate] == null) {
+        _shifts[shiftDate] = [];
+      }
+      _shifts[shiftDate]!.add(shift);
+    }
+    notifyListeners();
+  }
+}
+
+class EmployeeProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Employee> _employees = [];
+
+  List<Employee> get employees => _employees;
+
+  Future<void> fetchEmployees() async {
+    final QuerySnapshot snapshot =
+        await _firestore.collection('employees').get();
+    _employees = snapshot.docs.map((doc) {
+      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      return Employee.fromJson({...data, 'id': doc.id});
+    }).toList();
+    notifyListeners();
+  }
+
+  Future<void> addEmployee(Employee employee) async {
+    final docRef =
+        await _firestore.collection('employees').add(employee.toJson());
+    employee = Employee(
+      id: docRef.id,
+      name: employee.name,
+      position: employee.position,
+      teamId: employee.teamId,
+      email: employee.email,
+      phoneNumber: employee.phoneNumber,
+    );
+    _employees.add(employee);
+    notifyListeners();
+  }
+
+  Future<void> updateEmployee(Employee employee) async {
+    await _firestore
+        .collection('employees')
+        .doc(employee.id)
+        .update(employee.toJson());
+    final index = _employees.indexWhere((e) => e.id == employee.id);
+    _employees[index] = employee;
+    notifyListeners();
+  }
+
+  Future<void> deleteEmployee(Employee employee) async {
+    await _firestore.collection('employees').doc(employee.id).delete();
+    _employees.removeWhere((e) => e.id == employee.id);
+    notifyListeners();
+  }
+
+  Future<Employee> getEmployeeById(String id) async {
+    if (_employees.isEmpty) {
+      await fetchEmployees();
+    }
+    return _employees.firstWhere(
+      (employee) => employee.id == id,
+      orElse: () => Employee(
+          id: '', name: 'Unknown', position: '', email: '', phoneNumber: ''),
+    );
+  }
+}
+
+class TeamProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Team> _teams = [];
+
+  List<Team> get teams => _teams;
+
+  Future<void> fetchTeams() async {
+    final QuerySnapshot snapshot =
+        await _firestore.collection('teams').get();
+    _teams = snapshot.docs.map((doc) {
+      Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+      return Team.fromJson({...data, 'id': doc.id});
+    }).toList();
+    notifyListeners();
+  }
+
+  Future<void> addTeam(Team team) async {
+    final teamData = team.toJson();
+    teamData.remove('id'); // Remove id before adding to Firestore
+    final docRef = await _firestore.collection('teams').add(teamData);
+    team = Team(
+      id: docRef.id,
+      name: team.name,
+      description: team.description,
+      employeeIds: team.employeeIds,
+      managerId: team.managerId,
+    );
+    _teams.add(team);
+    notifyListeners();
+  }
+
+  Future<void> updateTeam(Team team) async {
+    if (team.id.isEmpty) {
+      print('Error: Attempting to update a team with an empty ID');
+      return;
+    }
+    final teamData = team.toJson();
+    teamData.remove('id'); // Remove id before updating in Firestore
+    await _firestore.collection('teams').doc(team.id).update(teamData);
+    final index = _teams.indexWhere((t) => t.id == team.id);
+    _teams[index] = team;
+    notifyListeners();
+  }
+
+  Future<void> deleteTeam(Team team) async {
+    if (team.id.isEmpty) {
+      print('Error: Attempting to delete a team with an empty ID');
+      return;
+    }
+    await _firestore.collection('teams').doc(team.id).delete();
+    _teams.removeWhere((t) => t.id == team.id);
+    notifyListeners();
+  }
+}
+```
+
+shift_periods_page.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'models.dart';
+import 'main.dart' show ShiftProvider;
+
+class ShiftPeriodsPage extends StatefulWidget {
+  @override
+  _ShiftPeriodsPageState createState() => _ShiftPeriodsPageState();
+}
+
+class _ShiftPeriodsPageState extends State<ShiftPeriodsPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<ShiftProvider>(context, listen: false).fetchShiftPeriods();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Shift Periods'),
+      ),
+      body: Consumer2<ShiftProvider, TeamProvider>(
+        builder: (context, shiftProvider, teamProvider, child) {
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth > 600) {
+                // For larger screens, use a grid view
+                return GridView.builder(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: constraints.maxWidth > 900 ? 3 : 2,
+                    childAspectRatio: 3,
+                  ),
+                  itemCount: shiftProvider.shiftPeriods.length,
+                  itemBuilder: (context, index) {
+                    return _buildShiftPeriodItem(shiftProvider.shiftPeriods[index], teamProvider, shiftProvider, constraints);
+                  },
+                );
+              } else {
+                // For smaller screens, use a list view
+                return ListView.builder(
+                  itemCount: shiftProvider.shiftPeriods.length,
+                  itemBuilder: (context, index) {
+                    return _buildShiftPeriodItem(shiftProvider.shiftPeriods[index], teamProvider, shiftProvider, constraints);
+                  },
+                );
+              }
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: () => _addShiftPeriod(context),
+      ),
+    );
+  }
+
+  Widget _buildShiftPeriodItem(ShiftPeriod period, TeamProvider teamProvider, ShiftProvider shiftProvider, BoxConstraints constraints) {
+    final team = teamProvider.teams.firstWhere(
+      (team) => team.id == period.teamId,
+      orElse: () => Team(id: '', name: 'Unknown Team', description: '', employeeIds: []),
+    );
+    return Card(
+      child: ListTile(
+        title: Text(period.name, style: TextStyle(fontSize: constraints.maxWidth > 600 ? 18 : 16)),
+        subtitle: Text(
+          '${period.startTime.format(context)} - ${period.endTime.format(context)}\nTeam: ${team.name}',
+          style: TextStyle(fontSize: constraints.maxWidth > 600 ? 14 : 12),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: constraints.maxWidth > 600 ? 30 : 24,
+              height: constraints.maxWidth > 600 ? 30 : 24,
+              decoration: BoxDecoration(
+                color: period.color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            SizedBox(width: 8),
+            IconButton(
+              icon: Icon(Icons.edit),
+              onPressed: () => _editShiftPeriod(context, shiftProvider, teamProvider, period),
+            ),
+            IconButton(
+              icon: Icon(Icons.delete),
+              onPressed: () => _deleteShiftPeriod(context, shiftProvider, period),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _addShiftPeriod(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => ShiftPeriodDialog(
+        onSave: (name, startTime, endTime, color, teamId) {
+          final period = ShiftPeriod(name: name, startTime: startTime, endTime: endTime, color: color, teamId: teamId);
+          Provider.of<ShiftProvider>(context, listen: false).addShiftPeriod(period).catchError((error) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error adding shift period: $error')),
+            );
+          });
+        },
+      ),
+    );
+  }
+
+  void _editShiftPeriod(BuildContext context, ShiftProvider provider, TeamProvider teamProvider, ShiftPeriod period) {
+    showDialog(
+      context: context,
+      builder: (context) => ShiftPeriodDialog(
+        initialName: period.name,
+        initialStartTime: period.startTime,
+        initialEndTime: period.endTime,
+        initialColor: period.color,
+        initialTeamId: period.teamId,
+        onSave: (name, startTime, endTime, color, teamId) {
+          final updatedPeriod = ShiftPeriod(
+            id: period.id,
+            name: name,
+            startTime: startTime,
+            endTime: endTime,
+            color: color,
+            teamId: teamId,
+          );
+          provider.updateShiftPeriod(updatedPeriod).catchError((error) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error updating shift period: $error')),
+            );
+          });
+        },
+      ),
+    );
+  }
+
+  void _deleteShiftPeriod(BuildContext context, ShiftProvider provider, ShiftPeriod period) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Shift Period'),
+        content: Text('Are you sure you want to delete this shift period?'),
+        actions: [
+          TextButton(
+            child: Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('Delete'),
+            onPressed: () {
+              provider.deleteShiftPeriod(period.id!).catchError((error) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error deleting shift period: $error')),
+                );
+              });
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ShiftPeriodDialog extends StatefulWidget {
+  final String? initialName;
+  final TimeOfDay? initialStartTime;
+  final TimeOfDay? initialEndTime;
+  final Color? initialColor;
+  final String? initialTeamId;
+  final Function(String, TimeOfDay, TimeOfDay, Color, String) onSave;
+
+  ShiftPeriodDialog({
+    this.initialName,
+    this.initialStartTime,
+    this.initialEndTime,
+    this.initialColor,
+    this.initialTeamId,
+    required this.onSave,
+  });
+
+  @override
+  _ShiftPeriodDialogState createState() => _ShiftPeriodDialogState();
+}
+
+class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
+  late TextEditingController _nameController;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late Color _color;
+  String? _selectedTeamId;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _startTime = widget.initialStartTime ?? TimeOfDay(hour: 9, minute: 0);
+    _endTime = widget.initialEndTime ?? TimeOfDay(hour: 17, minute: 0);
+    _color = widget.initialColor ?? Colors.blue;
+    _selectedTeamId = widget.initialTeamId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.initialName == null ? 'Add Shift Period' : 'Edit Shift Period'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: 'Period Name'),
+            ),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Start Time'),
+                TextButton(
+                  child: Text(_startTime.format(context)),
+                  onPressed: () async {
+                    final TimeOfDay? time = await showTimePicker(
+                      context: context,
+                      initialTime: _startTime,
+                    );
+                    if (time != null) {
+                      setState(() => _startTime = time);
+                    }
+                  },
+                ),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('End Time'),
+                TextButton(
+                  child: Text(_endTime.format(context)),
+                  onPressed: () async {
+                    final TimeOfDay? time = await showTimePicker(
+                      context: context,
+                      initialTime: _endTime,
+                    );
+                    if (time != null) {
+                      setState(() => _endTime = time);
+                    }
+                  },
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Color'),
+                GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext context) {
+                        return AlertDialog(
+                          title: const Text('Pick a color'),
+                          content: SingleChildScrollView(
+                            child: ColorPicker(
+                              pickerColor: _color,
+                              onColorChanged: (Color color) {
+                                setState(() => _color = color);
+                              },
+                              showLabel: true,
+                              pickerAreaHeightPercent: 0.8,
+                            ),
+                          ),
+                          actions: <Widget>[
+                            TextButton(
+                              child: const Text('OK'),
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                              },
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            Consumer<TeamProvider>(
+              builder: (context, teamProvider, child) {
+                return DropdownButtonFormField<String>(
+                  value: _selectedTeamId,
+                  hint: Text('Select Team'),
+                  items: teamProvider.teams.map((Team team) {
+                    return DropdownMenuItem<String>(
+                      value: team.id,
+                      child: Text(team.name),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    setState(() {
+                      _selectedTeamId = newValue;
+                    });
+                  },
+                  decoration: InputDecoration(labelText: 'Team'),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Save'),
+          onPressed: () {
+            if (_selectedTeamId != null) {
+              widget.onSave(_nameController.text, _startTime, _endTime, _color, _selectedTeamId!);
+              Navigator.of(context).pop();
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Please select a team')),
+              );
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+}
+```
+
+employee.dart
+```dart
+import 'package:flutter/foundation.dart';
+
+class Employee {
+  final String id;
+  final String name;
+  final String position;
+  final String? teamId;
+  final String email;
+  final String phoneNumber;
+
+  Employee({
+    required this.id,
+    required this.name,
+    required this.position,
+    this.teamId,
+    required this.email,
+    required this.phoneNumber,
+  });
+
+  factory Employee.fromJson(Map<String, dynamic> json) {
+    return Employee(
+      id: json['id'],
+      name: json['name'],
+      position: json['position'],
+      teamId: json['teamId'],
+      email: json['email'] ?? "",
+      phoneNumber: json['phoneNumber'] ?? "",
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'position': position,
+      'teamId': teamId,
+      'email': email,
+      'phoneNumber': phoneNumber,
+    };
+  }
+}
+```
+
+shift_period.dart
+```dart
+import 'package:flutter/material.dart';
+
+class ShiftPeriod {
+  String? id;
+  String name;
+  TimeOfDay startTime;
+  TimeOfDay endTime;
+  Color color;
+  String teamId;
+
+  ShiftPeriod({
+    this.id,
+    required this.name,
+    required this.startTime,
+    required this.endTime,
+    required this.color,
+    required this.teamId,
+  });
+
+  factory ShiftPeriod.fromMap(Map<String, dynamic> map, String id) {
+    return ShiftPeriod(
+      id: id,
+      name: map['name'] ?? '',
+      startTime: TimeOfDay(
+        hour: map['startHour'] ?? 0,
+        minute: map['startMinute'] ?? 0,
+      ),
+      endTime: TimeOfDay(
+        hour: map['endHour'] ?? 0,
+        minute: map['endMinute'] ?? 0,
+      ),
+      color: Color(map['color'] ?? 0xFF000000),
+      teamId: map['teamId'] ?? '',
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'startHour': startTime.hour,
+      'startMinute': startTime.minute,
+      'endHour': endTime.hour,
+      'endMinute': endTime.minute,
+      'color': color.value,
+      'teamId': teamId,
+    };
+  }
+}
+```
+
+shift.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class Shift {
+  String? id;
+  DateTime date;
+  String title;
+  TimeOfDay startTime;
+  TimeOfDay endTime;
+  String employeeId;
+  String shiftPeriodId;
+
+  Shift({
+    this.id,
+    required this.date,
+    required this.title,
+    required this.startTime,
+    required this.endTime,
+    required this.employeeId,
+    required this.shiftPeriodId,
+  });
+
+  factory Shift.fromMap(Map<String, dynamic> map, String id) {
+    return Shift(
+      id: id,
+      date: (map['date'] as Timestamp).toDate(),
+      title: map['title'],
+      startTime: TimeOfDay.fromDateTime((map['startTime'] as Timestamp).toDate()),
+      endTime: TimeOfDay.fromDateTime((map['endTime'] as Timestamp).toDate()),
+      employeeId: map['employeeId'] ?? "",
+      shiftPeriodId: map['shiftPeriodId'] ?? "",
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'date': Timestamp.fromDate(date),
+      'title': title,
+      'startTime': Timestamp.fromDate(DateTime(date.year, date.month, date.day, startTime.hour, startTime.minute)),
+      'endTime': Timestamp.fromDate(DateTime(date.year, date.month, date.day, endTime.hour, endTime.minute)),
+      'employeeId': employeeId,
+      'shiftPeriodId': shiftPeriodId,
+    };
+  }
+}
+```
+
+team.dart
+```dart
+class Team {
+  final String id;
+  final String name;
+  final String description;
+  final List<String> employeeIds;
+  final String? managerId;
+
+  Team({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.employeeIds,
+    this.managerId,
+  });
+
+  factory Team.fromJson(Map<String, dynamic> json) {
+    return Team(
+      id: json['id'],
+      name: json['name'],
+      description: json['description'],
+      employeeIds: List<String>.from(json['employeeIds']),
+      managerId: json['managerId'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'employeeIds': employeeIds,
+      'managerId': managerId,
+    };
+  }
+}
+```
+
+employee_provider.dart
+```dart
+import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/employee.dart';
+
+class EmployeeProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Employee> _employees = [];
+  bool _isLoading = false;
+
+  List<Employee> get employees => _employees;
+  bool get isLoading => _isLoading;
+
+  Future<void> fetchEmployees() async {
+    if (_employees.isNotEmpty) return;
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final QuerySnapshot snapshot = await _firestore.collection('employees').get();
+      _employees = snapshot.docs.map((doc) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        return Employee.fromJson({...data, 'id': doc.id});
+      }).toList();
+    } catch (e) {
+      print('Error fetching employees: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> addEmployee(Employee employee) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final docRef = await _firestore.collection('employees').add(employee.toJson());
+      final newEmployee = Employee(
+        id: docRef.id,
+        name: employee.name,
+        position: employee.position,
+        teamId: employee.teamId,
+        email: employee.email,
+        phoneNumber: employee.phoneNumber,
+      );
+      _employees.add(newEmployee);
+    } catch (e) {
+      print('Error adding employee: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateEmployee(Employee employee) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _firestore.collection('employees').doc(employee.id).update(employee.toJson());
+      final index = _employees.indexWhere((e) => e.id == employee.id);
+      if (index != -1) {
+        _employees[index] = employee;
+      }
+    } catch (e) {
+      print('Error updating employee: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteEmployee(Employee employee) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _firestore.collection('employees').doc(employee.id).delete();
+      _employees.removeWhere((e) => e.id == employee.id);
+    } catch (e) {
+      print('Error deleting employee: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Employee? getEmployeeById(String id) {
+    return _employees.firstWhere(
+      (employee) => employee.id == id,
+      orElse: () => Employee(id: '', name: '', position: '', email: '', phoneNumber: ''),
+    );
+  }
+}
+```
+
+shift_provider.dart
+```dart
+import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/shift.dart';
+import '../models/shift_period.dart';
+
+class ShiftProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  Map<DateTime, List<Shift>> _shifts = {};
+  List<ShiftPeriod> _shiftPeriods = [];
+  bool _isLoading = false;
+
+  Map<DateTime, List<Shift>> get shifts => _shifts;
+  List<ShiftPeriod> get shiftPeriods => _shiftPeriods;
+  bool get isLoading => _isLoading;
+
+  Future<void> fetchShiftPeriods() async {
+    if (_shiftPeriods.isNotEmpty) return;
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final QuerySnapshot snapshot = await _firestore.collection('shiftPeriods').get();
+      _shiftPeriods = snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return ShiftPeriod.fromMap(data, doc.id);
+      }).toList();
+    } catch (e) {
+      print('Error fetching shift periods: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> addShiftPeriod(ShiftPeriod period) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final docRef = await _firestore.collection('shiftPeriods').add(period.toMap());
+      period.id = docRef.id;
+      _shiftPeriods.add(period);
+    } catch (e) {
+      print('Error adding shift period: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateShiftPeriod(ShiftPeriod period) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _firestore.collection('shiftPeriods').doc(period.id).update(period.toMap());
+      final index = _shiftPeriods.indexWhere((p) => p.id == period.id);
+      if (index != -1) {
+        _shiftPeriods[index] = period;
+      }
+    } catch (e) {
+      print('Error updating shift period: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteShiftPeriod(String id) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _firestore.collection('shiftPeriods').doc(id).delete();
+      _shiftPeriods.removeWhere((p) => p.id == id);
+    } catch (e) {
+      print('Error deleting shift period: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchShifts(DateTime month) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final startOfMonth = DateTime(month.year, month.month, 1);
+      final endOfMonth = DateTime(month.year, month.month + 1, 0);
+
+      final QuerySnapshot snapshot = await _firestore
+          .collection('shifts')
+          .where('date', isGreaterThanOrEqualTo: startOfMonth)
+          .where('date', isLessThanOrEqualTo: endOfMonth)
+          .get();
+
+      _shifts.clear();
+      for (var doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final shift = Shift.fromMap(data, doc.id);
+        final shiftDate = DateTime(shift.date.year, shift.date.month, shift.date.day);
+        if (_shifts[shiftDate] == null) {
+          _shifts[shiftDate] = [];
+        }
+        _shifts[shiftDate]!.add(shift);
+      }
+    } catch (e) {
+      print('Error fetching shifts: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Shift> addShift(Shift shift) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final docRef = await _firestore.collection('shifts').add(shift.toMap());
+      shift.id = docRef.id;
+      if (_shifts[shift.date] == null) {
+        _shifts[shift.date] = [];
+      }
+      _shifts[shift.date]!.add(shift);
+    } catch (e) {
+      print('Error adding shift: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+    return shift;
+  }
+
+  Future<void> updateShift(Shift shift) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _firestore.collection('shifts').doc(shift.id).update(shift.toMap());
+      final index = _shifts[shift.date]!.indexWhere((s) => s.id == shift.id);
+      if (index != -1) {
+        _shifts[shift.date]![index] = shift;
+      }
+    } catch (e) {
+      print('Error updating shift: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteShift(Shift shift) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _firestore.collection('shifts').doc(shift.id).delete();
+      _shifts[shift.date]!.removeWhere((s) => s.id == shift.id);
+    } catch (e) {
+      print('Error deleting shift: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchEmployeeShifts(String employeeId, DateTime month) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final startOfMonth = DateTime(month.year, month.month, 1);
+      final endOfMonth = DateTime(month.year, month.month + 1, 0);
+
+      final QuerySnapshot snapshot = await _firestore
+          .collection('shifts')
+          .where('employeeId', isEqualTo: employeeId)
+          .where('date', isGreaterThanOrEqualTo: startOfMonth)
+          .where('date', isLessThanOrEqualTo: endOfMonth)
+          .get();
+
+      _shifts.clear();
+      for (var doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final shift = Shift.fromMap(data, doc.id);
+        final shiftDate = DateTime(shift.date.year, shift.date.month, shift.date.day);
+        if (_shifts[shiftDate] == null) {
+          _shifts[shiftDate] = [];
+        }
+        _shifts[shiftDate]!.add(shift);
+      }
+    } catch (e) {
+      print('Error fetching employee shifts: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+}
+```
+
+team_provider.dart
+```dart
+import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/team.dart';
+
+class TeamProvider with ChangeNotifier {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  List<Team> _teams = [];
+  bool _isLoading = false;
+
+  List<Team> get teams => _teams;
+  bool get isLoading => _isLoading;
+
+  Future<void> fetchTeams() async {
+    if (_teams.isNotEmpty) return;
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final QuerySnapshot snapshot = await _firestore.collection('teams').get();
+      _teams = snapshot.docs.map((doc) {
+        Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+        return Team.fromJson({...data, 'id': doc.id});
+      }).toList();
+    } catch (e) {
+      print('Error fetching teams: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> addTeam(Team team) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final teamData = team.toJson();
+      teamData.remove('id');
+      final docRef = await _firestore.collection('teams').add(teamData);
+      final newTeam = Team(
+        id: docRef.id,
+        name: team.name,
+        description: team.description,
+        employeeIds: team.employeeIds,
+        managerId: team.managerId,
+      );
+      _teams.add(newTeam);
+    } catch (e) {
+      print('Error adding team: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateTeam(Team team) async {
+    if (team.id.isEmpty) {
+      print('Error: Attempting to update a team with an empty ID');
+      return;
+    }
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final teamData = team.toJson();
+      teamData.remove('id');
+      await _firestore.collection('teams').doc(team.id).update(teamData);
+      final index = _teams.indexWhere((t) => t.id == team.id);
+      if (index != -1) {
+        _teams[index] = team;
+      }
+    } catch (e) {
+      print('Error updating team: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteTeam(Team team) async {
+    if (team.id.isEmpty) {
+      print('Error: Attempting to delete a team with an empty ID');
+      return;
+    }
+
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _firestore.collection('teams').doc(team.id).delete();
+      _teams.removeWhere((t) => t.id == team.id);
+    } catch (e) {
+      print('Error deleting team: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Team? getTeamById(String id) {
+    return _teams.firstWhere(
+      (team) => team.id == id,
+      orElse: () => Team(id: '', name: '', description: '', employeeIds: []),
+    );
+  }
+}
+```
+
+calendar_page.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:table_calendar/table_calendar.dart';
+import 'package:fl_chart/fl_chart.dart';
+import '../providers/shift_provider.dart';
+import '../providers/employee_provider.dart';
+import '../providers/team_provider.dart';
+import '../models/shift.dart';
+import '../models/shift_period.dart';
+import '../widgets/shift_dialog.dart';
+import '../services/auth_service.dart';
+import 'shift_periods_page.dart';
+import 'employee_management_page.dart';
+
+class CalendarPage extends StatefulWidget {
+  @override
+  _CalendarPageState createState() => _CalendarPageState();
+}
+
+class _CalendarPageState extends State<CalendarPage> {
+  CalendarFormat _calendarFormat = CalendarFormat.month;
+  DateTime _focusedDay = DateTime.now();
+  DateTime? _selectedDay;
+  String? _currentUserId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDay = _focusedDay;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchInitialData();
+    });
+  }
+
+  void _fetchInitialData() {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final shiftProvider = Provider.of<ShiftProvider>(context, listen: false);
+    final employeeProvider = Provider.of<EmployeeProvider>(context, listen: false);
+    final teamProvider = Provider.of<TeamProvider>(context, listen: false);
+
+    _currentUserId = authService.currentUser?.uid;
+
+    shiftProvider.fetchShiftPeriods();
+    teamProvider.fetchTeams();
+    employeeProvider.fetchEmployees();
+    shiftProvider.fetchShifts(_focusedDay);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Shift Calendar'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.brightness_6),
+            onPressed: () {
+              // Implement theme toggle functionality
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => ShiftPeriodsPage()),
+              );
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.people),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => EmployeeManagementPage()),
+              );
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.logout),
+            onPressed: () async {
+              await context.read<AuthService>().signOut();
+            },
+          ),
+        ],
+      ),
+      body: Consumer<ShiftProvider>(
+        builder: (context, shiftProvider, child) {
+          if (shiftProvider.isLoading) {
+            return Center(child: CircularProgressIndicator());
+          }
+          return _buildCalendarContent(context);
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: () => _addShift(context),
+      ),
+    );
+  }
+
+
+  Widget _buildCalendarContent(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _buildTableCalendar(),
+          SizedBox(height: 8),
+          _buildShiftList(),
+          SizedBox(height: 16),
+          _buildWeeklyShiftChart(),
+          SizedBox(height: 16),
+          _buildEmployeeShiftDistribution(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTableCalendar() {
+    return Consumer<ShiftProvider>(
+      builder: (context, shiftProvider, child) {
+        return TableCalendar(
+          firstDay: DateTime.utc(2020, 1, 1),
+          lastDay: DateTime.utc(2030, 12, 31),
+          focusedDay: _focusedDay,
+          calendarFormat: _calendarFormat,
+          selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+          onDaySelected: (selectedDay, focusedDay ) {
+            setState(() {
+              _selectedDay = selectedDay;
+              _focusedDay = focusedDay;
+            });
+          },
+          onFormatChanged: (format) {
+            if (_calendarFormat != format) {
+              setState(() => _calendarFormat = format);
+            }
+          },
+          onPageChanged: (focusedDay) {
+            _focusedDay = focusedDay;
+            shiftProvider.fetchShifts(focusedDay);
+          },
+          calendarBuilders: CalendarBuilders(
+            defaultBuilder: (context, day, _) => _buildCalendarDayContainer(day, shiftProvider),
+            selectedBuilder: (context, day, _) => _buildCalendarDayContainer(day, shiftProvider, isSelected: true),
+            todayBuilder: (context, day, _) => _buildCalendarDayContainer(day, shiftProvider, isToday: true),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCalendarDayContainer(DateTime day, ShiftProvider shiftProvider, {bool isSelected = false, bool isToday = false}) {
+    final shifts = shiftProvider.shifts[DateTime(day.year, day.month, day.day)] ?? [];
+    Color backgroundColor = Colors.transparent;
+
+    if (shifts.isNotEmpty) {
+      final shift = shifts.first;
+      final shiftPeriod = shiftProvider.shiftPeriods.firstWhere(
+        (period) => period.id == shift.shiftPeriodId,
+        orElse: () => ShiftPeriod(name: '', startTime: TimeOfDay.now(), endTime: TimeOfDay.now(), color: Colors.grey, teamId: ''),
+      );
+      backgroundColor = shiftPeriod.color.withOpacity(0.3);
+    }
+
+    return Container(
+      margin: const EdgeInsets.all(4.0),
+      padding: const EdgeInsets.all(5.0),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        border: Border.all(
+          color: isSelected ? Colors.blue : (isToday ? Colors.red : Colors.transparent),
+          width: 1.5,
+        ),
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Center(
+        child: Text(
+          '${day.day}',
+          style: TextStyle(
+            color: isSelected || isToday ? Colors.black : null,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShiftList() {
+    return Consumer2<ShiftProvider, EmployeeProvider>(
+      builder: (context, shiftProvider, employeeProvider, child) {
+        if (_selectedDay == null) return Container();
+
+        final selectedShifts = shiftProvider.shifts[DateTime(_selectedDay!.year, _selectedDay!.month, _selectedDay!.day)] ?? [];
+        if (selectedShifts.isEmpty) {
+          return Center(child: Text('No shifts scheduled for this day'));
+        }
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: NeverScrollableScrollPhysics(),
+          itemCount: selectedShifts.length,
+          itemBuilder: (context, index) {
+            final shift = selectedShifts[index];
+            final employee = employeeProvider.getEmployeeById(shift.employeeId);
+            return ListTile(
+              title: Text(shift.title),
+              subtitle: Text('${shift.startTime.format(context)} - ${shift.endTime.format(context)}'),
+              trailing: Text(employee?.name ?? 'Unknown Employee'),
+              onTap: () => _editShift(context, shift),
+              onLongPress: () => _deleteShift(context, shift),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _addShift(BuildContext context) {
+    final employeeProvider = Provider.of<EmployeeProvider>(context, listen: false);
+    final initialEmployeeId = employeeProvider.employees.any((e) => e.id == _currentUserId) ? _currentUserId : null;
+
+    showDialog(
+      context: context,
+      builder: (context) => ShiftDialog(
+        shiftPeriods: Provider.of<ShiftProvider>(context, listen: false).shiftPeriods,
+        onSave: (title, startTime, endTime, employeeId, shiftPeriodId) async {
+          final shift = Shift(
+            date: _selectedDay!,
+            title: title,
+            startTime: startTime,
+            endTime: endTime,
+            employeeId: employeeId,
+            shiftPeriodId: shiftPeriodId,
+          );
+          await Provider.of<ShiftProvider>(context, listen: false).addShift(shift);
+        },
+      ),
+    );
+  }
+
+  void _editShift(BuildContext context, Shift shift) {
+    showDialog(
+      context: context,
+      builder: (context) => ShiftDialog(
+        shift: shift,
+        shiftPeriods: Provider.of<ShiftProvider>(context, listen: false).shiftPeriods,
+        onSave: (title, startTime, endTime, employeeId, shiftPeriodId) async {
+          final updatedShift = Shift(
+            id: shift.id,
+            date: shift.date,
+            title: title,
+            startTime: startTime,
+            endTime: endTime,
+            employeeId: employeeId,
+            shiftPeriodId: shiftPeriodId,
+          );
+          await Provider.of<ShiftProvider>(context, listen: false).updateShift(updatedShift);
+        },
+      ),
+    );
+  }
+
+  void _deleteShift(BuildContext context, Shift shift) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Shift'),
+        content: Text('Are you sure you want to delete this shift?'),
+        actions: [
+          TextButton(
+            child: Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text('Delete'),
+            onPressed: () async {
+              await Provider.of<ShiftProvider>(context, listen: false).deleteShift(shift);
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeeklyShiftChart() {
+    return Consumer<ShiftProvider>(
+      builder: (context, shiftProvider, child) {
+        final weekStart = _focusedDay.subtract(Duration(days: _focusedDay.weekday - 1));
+        final weekShifts = List.generate(7, (index) {
+          final day = weekStart.add(Duration(days: index));
+          return shiftProvider.shifts[day]?.length ?? 0;
+        });
+
+        return Container(
+          height: 200,
+          padding: EdgeInsets.all(16),
+          child: BarChart(
+            BarChartData(
+              alignment: BarChartAlignment.spaceAround,
+              maxY: weekShifts.reduce((a, b) => a > b ? a : b).toDouble(),
+              titlesData: FlTitlesData(
+                show: true,
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) {
+                      const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+                      return Text(days[value.toInt()]);
+                    },
+                    reservedSize: 30,
+                  ),
+                ),
+                leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              ),
+              borderData: FlBorderData(show: false),
+              barGroups: List.generate(7, (index) {
+                return BarChartGroupData(
+                  x: index,
+                  barRods: [BarChartRodData(toY: weekShifts[index].toDouble())],
+                );
+              }),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEmployeeShiftDistribution() {
+    return Consumer2<ShiftProvider, EmployeeProvider>(
+      builder: (context, shiftProvider, employeeProvider, child) {
+        final employeeShiftCounts = <String, int>{};
+        shiftProvider.shifts.values.expand((shifts) => shifts).forEach((shift) {
+          employeeShiftCounts[shift.employeeId] = (employeeShiftCounts[shift.employeeId] ?? 0) + 1;
+        });
+
+        final totalShifts = employeeShiftCounts.values.fold(0, (sum, count) => sum + count);
+
+        return Container(
+          height: 300,
+          padding: EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Text('Employee Shift Distribution', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              SizedBox(height: 8),
+              Expanded(
+                child: PieChart(
+                  PieChartData(
+                    sections: employeeShiftCounts.entries.map((entry) {
+                      final employee = employeeProvider.getEmployeeById(entry.key);
+                      return PieChartSectionData(
+                        color: Colors.primaries[entry.key.hashCode % Colors.primaries.length],
+                        value: entry.value.toDouble(),
+                        title: '${(entry.value / totalShifts * 100).toStringAsFixed(1)}%',
+                        radius: 50,
+                        titleStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+              SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: employeeShiftCounts.entries.map((entry) {
+                  final employee = employeeProvider.getEmployeeById(entry.key);
+                  return Chip(
+                    label: Text(employee?.name ?? 'Unknown'),
+                    backgroundColor: Colors.primaries[entry.key.hashCode % Colors.primaries.length].withOpacity(0.3),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+```
+
+employee_management_page.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/employee_provider.dart';
+import '../models/employee.dart';
+import '../widgets/employee_dialog.dart';
+
+class EmployeeManagementPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Employee Management')),
+      body: Consumer<EmployeeProvider>(
+        builder: (context, employeeProvider, child) {
+          if (employeeProvider.isLoading) {
+            return Center(child: CircularProgressIndicator());
+          }
+          return ListView.builder(
+            itemCount: employeeProvider.employees.length,
+            itemBuilder: (context, index) {
+              final employee = employeeProvider.employees[index];
+              return ListTile(
+                title: Text(employee.name),
+                subtitle: Text(employee.position),
+                trailing: IconButton(
+                  icon: Icon(Icons.edit),
+                  onPressed: () => _editEmployee(context, employeeProvider, employee),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: () => _addEmployee(context),
+      ),
+    );
+  }
+
+  void _addEmployee(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => EmployeeDialog(
+        onSave: (Employee newEmployee) {
+          Provider.of<EmployeeProvider>(context, listen: false).addEmployee(newEmployee);
+        },
+      ),
+    );
+  }
+
+  void _editEmployee(BuildContext context, EmployeeProvider provider, Employee employee) {
+    showDialog(
+      context: context,
+      builder: (context) => EmployeeDialog(
+        employee: employee,
+        onSave: (Employee updatedEmployee) {
+          provider.updateEmployee(updatedEmployee);
+        },
+      ),
+    );
+  }
+}
+```
+
+shift_periods_page.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/shift_provider.dart';
+import '../models/shift_period.dart';
+import '../widgets/shift_period_dialog.dart';
+
+class ShiftPeriodsPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Shift Periods')),
+      body: Consumer<ShiftProvider>(
+        builder: (context, shiftProvider, child) {
+          if (shiftProvider.isLoading) {
+            return Center(child: CircularProgressIndicator());
+          }
+          return ListView.builder(
+            itemCount: shiftProvider.shiftPeriods.length,
+            itemBuilder: (context, index) {
+              final period = shiftProvider.shiftPeriods[index];
+              return ListTile(
+                title: Text(period.name),
+                subtitle: Text('${period.startTime.format(context)} - ${period.endTime.format(context)}'),
+                trailing: IconButton(
+                  icon: Icon(Icons.edit),
+                  onPressed: () => _editShiftPeriod(context, shiftProvider, period),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: () => _addShiftPeriod(context),
+      ),
+    );
+  }
+
+  void _addShiftPeriod(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => ShiftPeriodDialog(
+        onSave: (ShiftPeriod newPeriod) {
+          Provider.of<ShiftProvider>(context, listen: false).addShiftPeriod(newPeriod);
+        },
+      ),
+    );
+  }
+
+  void _editShiftPeriod(BuildContext context, ShiftProvider provider, ShiftPeriod period) {
+    showDialog(
+      context: context,
+      builder: (context) => ShiftPeriodDialog(
+        shiftPeriod: period,
+        onSave: (ShiftPeriod updatedPeriod) {
+          provider.updateShiftPeriod(updatedPeriod);
+        },
+      ),
+    );
+  }
+}
+```
+
+auth_service.dart
+```dart
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+
+class AuthService with ChangeNotifier {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  User? get currentUser => _auth.currentUser;
+
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  Future<void> signInWithEmailAndPassword(String email, String password) async {
+    try {
+      await _auth.signInWithEmailAndPassword(email: email, password: password);
+      notifyListeners();
+    } catch (e) {
+      print(e);
+      rethrow;
+    }
+  }
+
+  Future<void> signOut() async {
+    await _auth.signOut();
+    notifyListeners();
+  }
+}
+```
+
+constants.dart
+```dart
+import 'package:flutter/material.dart';
+
+class AppColors {
+  static const primaryColor = Colors.blue;
+  static const accentColor = Colors.blueAccent;
+}
+
+class AppTextStyles {
+  static const headerStyle = TextStyle(fontSize: 24, fontWeight: FontWeight.bold);
+  static const subHeaderStyle = TextStyle(fontSize: 18, fontWeight: FontWeight.w500);
+}
+```
+
+employee_dialog.dart
+```dart
+import 'package:flutter/material.dart';
+import '../models/employee.dart';
+
+class EmployeeDialog extends StatefulWidget {
+  final Employee? employee;
+  final Function(Employee) onSave;
+
+  EmployeeDialog({this.employee, required this.onSave});
+
+  @override
+  _EmployeeDialogState createState() => _EmployeeDialogState();
+}
+
+class _EmployeeDialogState extends State<EmployeeDialog> {
+  late TextEditingController _nameController;
+  late TextEditingController _positionController;
+  late TextEditingController _emailController;
+  late TextEditingController _phoneController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.employee?.name ?? '');
+    _positionController = TextEditingController(text: widget.employee?.position ?? '');
+    _emailController = TextEditingController(text: widget.employee?.email ?? '');
+    _phoneController = TextEditingController(text: widget.employee?.phoneNumber ?? '');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.employee == null ? 'Add Employee' : 'Edit Employee'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: 'Name'),
+            ),
+            TextField(
+              controller: _positionController,
+              decoration: InputDecoration(labelText: 'Position'),
+            ),
+            TextField(
+              controller: _emailController,
+              decoration: InputDecoration(labelText: 'Email'),
+            ),
+            TextField(
+              controller: _phoneController,
+              decoration: InputDecoration(labelText: 'Phone Number'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Save'),
+          onPressed: () {
+            final employee = Employee(
+              id: widget.employee?.id ?? '',
+              name: _nameController.text,
+              position: _positionController.text,
+              email: _emailController.text,
+              phoneNumber: _phoneController.text,
+            );
+            widget.onSave(employee);
+            Navigator.of(context).pop();
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _positionController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+}
+```
+
+shift_dialog.dart
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../models/shift_period.dart';
+import '../models/shift.dart';
+import '../providers/employee_provider.dart';
+
+class ShiftDialog extends StatefulWidget {
+  final Shift? shift;
+  final List<ShiftPeriod> shiftPeriods;
+  final Function(String, TimeOfDay, TimeOfDay, String, String) onSave;
+
+  ShiftDialog({
+    this.shift,
+    required this.shiftPeriods,
+    required this.onSave,
+  });
+
+  @override
+  _ShiftDialogState createState() => _ShiftDialogState();
+}
+
+class _ShiftDialogState extends State<ShiftDialog> {
+  late TextEditingController _titleController;
+  ShiftPeriod? _selectedPeriod;
+  String? _selectedEmployeeId;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.shift?.title ?? '');
+    _selectedEmployeeId = widget.shift?.employeeId;
+    if (widget.shift != null) {
+      _selectedPeriod = widget.shiftPeriods.firstWhere(
+        (period) => period.id == widget.shift!.shiftPeriodId,
+        orElse: () => widget.shiftPeriods.first,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.shift == null ? 'Add Shift' : 'Edit Shift'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<ShiftPeriod>(
+              value: _selectedPeriod,
+              hint: Text('Select Shift Period'),
+              isExpanded: true,
+              items: widget.shiftPeriods.map((ShiftPeriod period) {
+                return DropdownMenuItem<ShiftPeriod>(
+                  value: period,
+                  child: Text('${period.name} (${period.startTime.format(context)} - ${period.endTime.format(context)})'),
+                );
+              }).toList(),
+              onChanged: (ShiftPeriod? newValue) {
+                if (newValue != null) {
+                  setState(() {
+                    _selectedPeriod = newValue;
+                    _titleController.text = newValue.name;
+                  });
+                }
+              },
+            ),
+            SizedBox(height: 16),
+            TextField(
+              controller: _titleController,
+              decoration: InputDecoration(labelText: 'Shift Title'),
+            ),
+            SizedBox(height: 16),
+            Consumer<EmployeeProvider>(
+              builder: (context, employeeProvider, child) {
+                return DropdownButtonFormField<String>(
+                  value: _selectedEmployeeId,
+                  hint: Text('Select Employee'),
+                  isExpanded: true,
+                  items: employeeProvider.employees.map((employee) {
+                    return DropdownMenuItem<String>(
+                      value: employee.id,
+                      child: Text(employee.name),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    setState(() {
+                      _selectedEmployeeId = newValue;
+                    });
+                  },
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Save'),
+          onPressed: () {
+            if (_selectedPeriod != null && _selectedEmployeeId != null) {
+              widget.onSave(
+                _titleController.text,
+                _selectedPeriod!.startTime,
+                _selectedPeriod!.endTime,
+                _selectedEmployeeId!,
+                _selectedPeriod!.id!,
+              );
+              Navigator.of(context).pop();
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Please select a shift period and an employee')),
+              );
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+}
+```
+
+shift_period_dialog.dart
+```dart
+import 'package:flutter/material.dart';
+import '../models/shift_period.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+
+class ShiftPeriodDialog extends StatefulWidget {
+  final ShiftPeriod? shiftPeriod;
+  final Function(ShiftPeriod) onSave;
+
+  ShiftPeriodDialog({this.shiftPeriod, required this.onSave});
+
+  @override
+  _ShiftPeriodDialogState createState() => _ShiftPeriodDialogState();
+}
+
+class _ShiftPeriodDialogState extends State<ShiftPeriodDialog> {
+  late TextEditingController _nameController;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
+  late Color _color;
+  late String _teamId;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.shiftPeriod?.name ?? '');
+    _startTime = widget.shiftPeriod?.startTime ?? TimeOfDay(hour: 9, minute: 0);
+    _endTime = widget.shiftPeriod?.endTime ?? TimeOfDay(hour: 17, minute: 0);
+    _color = widget.shiftPeriod?.color ?? Colors.blue;
+    _teamId = widget.shiftPeriod?.teamId ?? '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.shiftPeriod == null ? 'Add Shift Period' : 'Edit Shift Period'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(labelText: 'Name'),
+            ),
+            SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    child: Text('Start Time: ${_startTime.format(context)}'),
+                    onPressed: () async {
+                      final TimeOfDay? time = await showTimePicker(
+                        context: context,
+                        initialTime: _startTime,
+                      );
+                      if (time != null) {
+                        setState(() => _startTime = time);
+                      }
+                    },
+                  ),
+                ),
+                Expanded(
+                  child: TextButton(
+                    child: Text('End Time: ${_endTime.format(context)}'),
+                    onPressed: () async {
+                      final TimeOfDay? time = await showTimePicker(
+                        context: context,
+                        initialTime: _endTime,
+                      );
+                      if (time != null) {
+                        setState(() => _endTime = time);
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            Row(
+              children: [
+                Text('Color: '),
+                GestureDetector(
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext context) {
+                        return AlertDialog(
+                          title: const Text('Pick a color'),
+                          content: SingleChildScrollView(
+                            child: ColorPicker(
+                              pickerColor: _color,
+                              onColorChanged: (Color color) {
+                                setState(() => _color = color);
+                              },
+                              showLabel: true,
+                              pickerAreaHeightPercent: 0.8,
+                            ),
+                          ),
+                          actions: <Widget>[
+                            TextButton(
+                              child: const Text('Done'),
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                              },
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 16),
+            TextField(
+              decoration: InputDecoration(labelText: 'Team ID'),
+              onChanged: (value) => _teamId = value,
+              controller: TextEditingController(text: _teamId),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: Text('Save'),
+          onPressed: () {
+            final shiftPeriod = ShiftPeriod(
+              id: widget.shiftPeriod?.id,
+              name: _nameController.text,
+              startTime: _startTime,
+              endTime: _endTime,
+              color: _color,
+              teamId: _teamId,
+            );
+            widget.onSave(shiftPeriod);
+            Navigator.of(context).pop();
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+}
+```
