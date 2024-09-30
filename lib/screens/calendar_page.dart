@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:glass_kit/glass_kit.dart';
 import '../providers/shift_provider.dart';
 import '../providers/employee_provider.dart';
 import '../providers/team_provider.dart';
@@ -25,6 +26,7 @@ class _CalendarPageState extends State<CalendarPage> {
   CalendarFormat _calendarFormat = CalendarFormat.month;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
+  bool _isLoadingShifts = false;
 
   @override
   void initState() {
@@ -50,14 +52,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ShiftProvider>(
-      builder: (context, shiftProvider, child) {
-        if (shiftProvider.isLoading) {
-          return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor)));
-        }
-        return _buildCalendarContent(context);
-      },
-    );
+    return _buildCalendarContent(context);
   }
 
   Widget _buildCalendarContent(BuildContext context) {
@@ -79,55 +74,97 @@ class _CalendarPageState extends State<CalendarPage> {
   Widget _buildTableCalendar() {
     return Consumer<ShiftProvider>(
       builder: (context, shiftProvider, child) {
-        return TableCalendar(
-          firstDay: DateTime.utc(2020, 1, 1),
-          lastDay: DateTime.utc(2030, 12, 31),
-          focusedDay: _focusedDay,
-          calendarFormat: _calendarFormat,
-          selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-          onDaySelected: (selectedDay, focusedDay ) {
-            setState(() {
-              _selectedDay = selectedDay;
-              _focusedDay = focusedDay;
-            });
-          },
-          onFormatChanged: (format) {
-            if (_calendarFormat != format) {
-              setState(() => _calendarFormat = format);
-            }
-          },
-          onPageChanged: (focusedDay) {
-            _focusedDay = focusedDay;
-            shiftProvider.fetchShifts(focusedDay);
-          },
-          calendarBuilders: CalendarBuilders(
-            defaultBuilder: (context, day, _) => _buildCalendarDayContainer(day, shiftProvider),
-            selectedBuilder: (context, day, _) => _buildCalendarDayContainer(day, shiftProvider, isSelected: true),
-            todayBuilder: (context, day, _) => _buildCalendarDayContainer(day, shiftProvider, isToday: true),
+        return GlassContainer(
+          height: 400,
+          width: MediaQuery.of(context).size.width - 32, // Subtract padding
+          gradient: LinearGradient(
+            colors: [Colors.white.withOpacity(0.40), Colors.white.withOpacity(0.10)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderGradient: LinearGradient(
+            colors: [Colors.white.withOpacity(0.60), Colors.white.withOpacity(0.10), Colors.lightBlueAccent.withOpacity(0.05), Colors.lightBlueAccent.withOpacity(0.6)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            stops: const [0.0, 0.39, 0.40, 1.0],
+          ),
+          blur: 10,
+          borderRadius: BorderRadius.circular(24.0),
+          borderWidth: 1.5,
+          elevation: 3,
+          isFrostedGlass: true,
+          shadowColor: Colors.black.withOpacity(0.20),
+          alignment: Alignment.center,
+          frostedOpacity: 0.12,
+          margin: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.all(8.0),
+          child: TableCalendar(
+            firstDay: DateTime.utc(2020, 1, 1),
+            lastDay: DateTime.utc(2030, 12, 31),
+            focusedDay: _focusedDay,
+            calendarFormat: _calendarFormat,
+            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            onDaySelected: (selectedDay, focusedDay ) {
+              setState(() {
+                _selectedDay = selectedDay;
+                _focusedDay = focusedDay;
+              });
+              // Only fetch shifts for the selected day
+              shiftProvider.fetchShifts(selectedDay);
+            },
+            onFormatChanged: (format) {
+              if (_calendarFormat != format) {
+                setState(() => _calendarFormat = format);
+                // Fetch shifts for the visible range when format changes
+                _fetchShiftsForVisibleRange(shiftProvider);
+              }
+            },
+            onPageChanged: (focusedDay) {
+              setState(() => _focusedDay = focusedDay);
+              // Fetch shifts for the visible range when page changes
+              _fetchShiftsForVisibleRange(shiftProvider);
+            },
+            calendarBuilders: CalendarBuilders(
+              defaultBuilder: (context, day, focusedDay) => _buildCalendarDayContainer(day, shiftProvider),
+              selectedBuilder: (context, day, focusedDay) => _buildCalendarDayContainer(day, shiftProvider, isSelected: true),
+              todayBuilder: (context, day, focusedDay) => _buildCalendarDayContainer(day, shiftProvider, isToday: true),
+            ),
           ),
         );
       },
     );
   }
 
+  void _fetchShiftsForVisibleRange(ShiftProvider shiftProvider) {
+    setState(() {
+      _isLoadingShifts = true;
+    });
+    final visibleDays = daysInRange(
+      _calendarFormat == CalendarFormat.month
+          ? _focusedDay.subtract(Duration(days: _focusedDay.weekday - 1))
+          : _focusedDay.subtract(Duration(days: _focusedDay.weekday - 1)),
+      _calendarFormat == CalendarFormat.month
+          ? _focusedDay.add(Duration(days: DateTime(_focusedDay.year, _focusedDay.month + 1, 0).day - _focusedDay.day + (7 - _focusedDay.weekday)))
+          : _focusedDay.add(Duration(days: 7 - _focusedDay.weekday)),
+    );
+    shiftProvider.fetchShiftsForRange(visibleDays.first, visibleDays.last).then((_) {
+      // Delay the setState call to allow for a smooth animation
+      Future.delayed(const Duration(milliseconds: 100), () {
+        setState(() {
+          _isLoadingShifts = false;
+        });
+      });
+    });
+  }
+
   Widget _buildCalendarDayContainer(DateTime day, ShiftProvider shiftProvider, {bool isSelected = false, bool isToday = false}) {
-    final shifts = shiftProvider.shifts[DateTime(day.year, day.month, day.day)] ?? [];
-    Color backgroundColor = Colors.transparent;
-
-    if (shifts.isNotEmpty) {
-      final shift = shifts.first;
-      final shiftPeriod = shiftProvider.shiftPeriods.firstWhere(
-        (period) => period.id == shift.shiftPeriodId,
-        orElse: () => ShiftPeriod(name: '', startTime: TimeOfDay.now(), endTime: TimeOfDay.now(), color: Colors.grey, teamId: ''),
-      );
-      backgroundColor = shiftPeriod.color.withOpacity(0.3);
-    }
-
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
       margin: const EdgeInsets.all(4.0),
       padding: const EdgeInsets.all(5.0),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: _getBackgroundColor(day, shiftProvider),
         border: Border.all(
           color: isSelected ? AppTheme.primaryColor : (isToday ? AppTheme.accentColor : Colors.transparent),
           width: 1.5,
@@ -146,6 +183,24 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
+  Color _getBackgroundColor(DateTime day, ShiftProvider shiftProvider) {
+    if (_isLoadingShifts) {
+      return Colors.transparent;
+    }
+    
+    final shifts = shiftProvider.shifts[DateTime(day.year, day.month, day.day)] ?? [];
+    if (shifts.isNotEmpty) {
+      final shift = shifts.first;
+      final shiftPeriod = shiftProvider.shiftPeriods.firstWhere(
+        (period) => period.id == shift.shiftPeriodId,
+        orElse: () => ShiftPeriod(name: '', startTime: TimeOfDay.now(), endTime: TimeOfDay.now(), color: Colors.grey, teamId: ''),
+      );
+      return shiftPeriod.color.withOpacity(0.3);
+    }
+    
+    return Colors.transparent;
+  }
+
   Widget _buildShiftList() {
     return Consumer2<ShiftProvider, EmployeeProvider>(
       builder: (context, shiftProvider, employeeProvider, child) {
@@ -156,21 +211,50 @@ class _CalendarPageState extends State<CalendarPage> {
           return const Center(child: Text('No shifts scheduled for this day'));
         }
 
-        return ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: selectedShifts.length,
-          itemBuilder: (context, index) {
-            final shift = selectedShifts[index];
-            final employee = employeeProvider.getEmployeeById(shift.employeeId);
-            return ListTile(
-              title: Text(shift.title),
-              subtitle: Text('${shift.startTime.format(context)} - ${shift.endTime.format(context)}'),
-              trailing: Text(employee?.name ?? 'Unknown Employee'),
-              onTap: () => _editShift(context, shift),
-              onLongPress: () => _deleteShift(context, shift),
-            );
-          },
+        return AnimatedOpacity(
+          opacity: _isLoadingShifts ? 0.5 : 1.0,
+          duration: const Duration(milliseconds: 300),
+          child: GlassContainer(
+            height: 200,
+            width: MediaQuery.of(context).size.width - 32,
+            gradient: LinearGradient(
+              colors: [Colors.white.withOpacity(0.40), Colors.white.withOpacity(0.10)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderGradient: LinearGradient(
+              colors: [Colors.white.withOpacity(0.60), Colors.white.withOpacity(0.10), Colors.lightBlueAccent.withOpacity(0.05), Colors.lightBlueAccent.withOpacity(0.6)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              stops: const [0.0, 0.39, 0.40, 1.0],
+            ),
+            blur: 10,
+            borderRadius: BorderRadius.circular(16.0),
+            borderWidth: 1.5,
+            elevation: 3,
+            isFrostedGlass: true,
+            shadowColor: Colors.black.withOpacity(0.20),
+            alignment: Alignment.center,
+            frostedOpacity: 0.12,
+            margin: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.all(8.0),
+            child: ListView.builder(
+              shrinkWrap: true,
+              physics: const ClampingScrollPhysics(),
+              itemCount: selectedShifts.length,
+              itemBuilder: (context, index) {
+                final shift = selectedShifts[index];
+                final employee = employeeProvider.getEmployeeById(shift.employeeId);
+                return ListTile(
+                  title: Text(shift.title),
+                  subtitle: Text('${shift.startTime.format(context)} - ${shift.endTime.format(context)}'),
+                  trailing: Text(employee?.name ?? 'Unknown Employee'),
+                  onTap: () => _editShift(context, shift),
+                  onLongPress: () => _deleteShift(context, shift),
+                );
+              },
+            ),
+          ),
         );
       },
     );
@@ -252,38 +336,65 @@ class _CalendarPageState extends State<CalendarPage> {
           return shiftProvider.shifts[day]?.length ?? 0;
         });
 
-        return Container(
-          height: 200,
-          padding: const EdgeInsets.all(16),
-          child: BarChart(
-            BarChartData(
-              alignment: BarChartAlignment.spaceAround,
-              maxY: weekShifts.reduce((a, b) => a > b ? a : b).toDouble(),
-              titlesData: FlTitlesData(
-                show: true,
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    getTitlesWidget: (value, meta) {
-                      const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-                      return Text(days[value.toInt()]);
-                    },
-                    reservedSize: 30,
+        return AnimatedOpacity(
+          opacity: _isLoadingShifts ? 0.5 : 1.0,
+          duration: const Duration(milliseconds: 300),
+          child: _isLoadingShifts
+              ? const Center(child: CircularProgressIndicator())
+              : GlassContainer(
+                  height: 250,
+                  width: MediaQuery.of(context).size.width - 32,
+                  gradient: LinearGradient(
+                    colors: [Colors.white.withOpacity(0.40), Colors.white.withOpacity(0.10)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderGradient: LinearGradient(
+                    colors: [Colors.white.withOpacity(0.60), Colors.white.withOpacity(0.10), Colors.lightBlueAccent.withOpacity(0.05), Colors.lightBlueAccent.withOpacity(0.6)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    stops: const [0.0, 0.39, 0.40, 1.0],
+                  ),
+                  blur: 10,
+                  borderRadius: BorderRadius.circular(16.0),
+                  borderWidth: 1.5,
+                  elevation: 3,
+                  isFrostedGlass: true,
+                  shadowColor: Colors.black.withOpacity(0.20),
+                  alignment: Alignment.center,
+                  frostedOpacity: 0.12,
+                  margin: const EdgeInsets.all(8.0),
+                  padding: const EdgeInsets.all(16.0),
+                  child: BarChart(
+                    BarChartData(
+                      alignment: BarChartAlignment.spaceAround,
+                      maxY: weekShifts.reduce((a, b) => a > b ? a : b).toDouble(),
+                      titlesData: FlTitlesData(
+                        show: true,
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            getTitlesWidget: (value, meta) {
+                              const days = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+                              return Text(days[value.toInt()]);
+                            },
+                            reservedSize: 30,
+                          ),
+                        ),
+                        leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      barGroups: List.generate(7, (index) {
+                        return BarChartGroupData(
+                          x: index,
+                          barRods: [BarChartRodData(toY: weekShifts[index].toDouble())],
+                        );
+                      }),
+                    ),
                   ),
                 ),
-                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-              ),
-              borderData: FlBorderData(show: false),
-              barGroups: List.generate(7, (index) {
-                return BarChartGroupData(
-                  x: index,
-                  barRods: [BarChartRodData(toY: weekShifts[index].toDouble())],
-                );
-              }),
-            ),
-          ),
         );
       },
     );
@@ -299,45 +410,81 @@ class _CalendarPageState extends State<CalendarPage> {
 
         final totalShifts = employeeShiftCounts.values.fold(0, (sum, count) => sum + count);
 
-        return Container(
-          height: 300,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              const Text('Employee Shift Distribution', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Expanded(
-                child: PieChart(
-                  PieChartData(
-                    sections: employeeShiftCounts.entries.map((entry) {
-                      employeeProvider.getEmployeeById(entry.key);
-                      return PieChartSectionData(
-                        color: Colors.primaries[entry.key.hashCode % Colors.primaries.length],
-                        value: entry.value.toDouble(),
-                        title: '${(entry.value / totalShifts * 100).toStringAsFixed(1)}%',
-                        radius: 50,
-                        titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
-                      );
-                    }).toList(),
+        return AnimatedOpacity(
+          opacity: _isLoadingShifts ? 0.5 : 1.0,
+          duration: const Duration(milliseconds: 300),
+          child: _isLoadingShifts
+              ? const Center(child: CircularProgressIndicator())
+              : GlassContainer(
+                  height: 350,
+                  width: MediaQuery.of(context).size.width - 32,
+                  gradient: LinearGradient(
+                    colors: [Colors.white.withOpacity(0.40), Colors.white.withOpacity(0.10)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderGradient: LinearGradient(
+                    colors: [Colors.white.withOpacity(0.60), Colors.white.withOpacity(0.10), Colors.lightBlueAccent.withOpacity(0.05), Colors.lightBlueAccent.withOpacity(0.6)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    stops: const [0.0, 0.39, 0.40, 1.0],
+                  ),
+                  blur: 10,
+                  borderRadius: BorderRadius.circular(16.0),
+                  borderWidth: 1.5,
+                  elevation: 3,
+                  isFrostedGlass: true,
+                  shadowColor: Colors.black.withOpacity(0.20),
+                  alignment: Alignment.center,
+                  frostedOpacity: 0.12,
+                  margin: const EdgeInsets.all(8.0),
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      const Text('Employee Shift Distribution', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: PieChart(
+                          PieChartData(
+                            sections: employeeShiftCounts.entries.map((entry) {
+                              final employee = employeeProvider.getEmployeeById(entry.key);
+                              return PieChartSectionData(
+                                color: Colors.primaries[entry.key.hashCode % Colors.primaries.length],
+                                value: entry.value.toDouble(),
+                                title: '${(entry.value / totalShifts * 100).toStringAsFixed(1)}%',
+                                radius: 50,
+                                titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: employeeShiftCounts.entries.map((entry) {
+                          final employee = employeeProvider.getEmployeeById(entry.key);
+                          return Chip(
+                            label: Text(employee?.name ?? 'Unknown'),
+                            backgroundColor: Colors.primaries[entry.key.hashCode % Colors.primaries.length].withOpacity(0.3),
+                          );
+                        }).toList(),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: employeeShiftCounts.entries.map((entry) {
-                  final employee = employeeProvider.getEmployeeById(entry.key);
-                  return Chip(
-                    label: Text(employee?.name ?? 'Unknown'),
-                    backgroundColor: Colors.primaries[entry.key.hashCode % Colors.primaries.length].withOpacity(0.3),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
         );
       },
     );
   }
+}
+
+// Helper function to generate a list of days between two dates
+List<DateTime> daysInRange(DateTime start, DateTime end) {
+  final days = <DateTime>[];
+  for (int i = 0; i <= end.difference(start).inDays; i++) {
+    days.add(start.add(Duration(days: i)));
+  }
+  return days;
 }

@@ -167,4 +167,27 @@ class ShiftProvider with ChangeNotifier {
       notifyListeners();
     }
   }
+
+  Future<void> fetchShiftsForRange(DateTime start, DateTime end) async {
+    try {
+      final QuerySnapshot snapshot = await _firestore
+          .collection('shifts')
+          .where('date', isGreaterThanOrEqualTo: start)
+          .where('date', isLessThanOrEqualTo: end)
+          .get();
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final shift = Shift.fromMap(data, doc.id);
+        final shiftDate = DateTime(shift.date.year, shift.date.month, shift.date.day);
+        if (_shifts[shiftDate] == null) {
+          _shifts[shiftDate] = [];
+        }
+        _shifts[shiftDate]!.add(shift);
+      }
+      notifyListeners();
+    } catch (e) {
+      ErrorHandler.handleFirestoreError(e);
+    }
+  }
 }
